@@ -1,6 +1,7 @@
 import { useUnreadNotificationCount } from "./lib/useUnreadNotificationCount";
 import React, { useEffect, useState } from "react";
 import {
+  BackHandler,
   ActivityIndicator,
   Dimensions,
   Image,
@@ -298,6 +299,49 @@ function StoreHome() {
 
   const [selectedConversationId, setSelectedConversationId] =
     useState<string | null>(null);
+  // ANDROID_SYSTEM_BACK_NAV
+  useEffect(() => {
+    const subscription =
+      BackHandler.addEventListener(
+        "hardwareBackPress",
+        () => {
+        if (selectedConversationId) {
+          setSelectedConversationId(null);
+          return true;
+        }
+        if (editingProductId) {
+          setEditingProductId(null);
+          return true;
+        }
+        if (selectedProduct) {
+          setSelectedProduct(null);
+          return true;
+        }
+        if (showChatInbox) {
+          setShowChatInbox(false);
+          return true;
+        }
+        if (showNotifications) {
+          setShowNotifications(false);
+          return true;
+        }
+        if (showProfile) {
+          setShowProfile(false);
+          return true;
+        }
+        if (showUpload) {
+          setShowUpload(false);
+          return true;
+        }
+          return true;
+        }
+      );
+
+    return () => {
+      subscription.remove();
+    };
+  }, [selectedConversationId, editingProductId, selectedProduct, showChatInbox, showNotifications, showProfile, showUpload]);
+
 
   async function loadProducts(
     isRefresh = false
