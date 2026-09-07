@@ -1,0 +1,922 @@
+import React, { useEffect, useState } from "react";
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import {
+  ArrowLeft,
+  BookOpen,
+  MessageCircle,
+  Share2,
+  ShieldCheck,
+  Star,
+} from "lucide-react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+
+import { supabase } from "../lib/supabase";
+import ProductReviewsSection from "./ProductReviewsSection";
+
+type ProductSummary = {
+  id: string;
+  creatorUserId: string;
+  type: string;
+  subject: string;
+  level: string;
+  title: string;
+  author: string;
+  rating: string;
+  reviewCount: number;
+  price: string;
+  thumbnailUrl: string | null;
+  downloadCount: number;
+};
+
+type ProductDetailRow = {
+  id: string;
+  creator_user_id: string;
+  creator_name: string;
+  title: string;
+  product_type: string;
+  subject: string;
+  class_level: string;
+  pricing_type: string;
+  price_amount: number | null;
+  original_price_amount: number | null;
+  description: string | null;
+  thumbnail_path: string | null;
+  download_count: number | null;
+};
+
+type Props = {
+  product: ProductSummary;
+  onBack: () => void;
+  onOpenChat: (
+    conversationId: string
+  ) => void;
+};
+
+export default function ProductDetailScreen({
+  product,
+  onBack,
+  onOpenChat,
+}: Props) {
+  const [detail, setDetail] =
+    useState<ProductDetailRow | null>(null);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [errorMessage, setErrorMessage] =
+    useState("");
+
+  const [currentUserId, setCurrentUserId] =
+    useState<string | null>(null);
+
+  const [contactLoading, setContactLoading] =
+    useState(false);
+
+  const [contactError, setContactError] =
+    useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadDetail() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+
+        if (!active) return;
+
+        setCurrentUserId(user?.id ?? null);
+
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("store_products")
+          .select(
+            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,download_count"
+          )
+          .eq("id", product.id)
+          .single();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) return;
+
+        setDetail(
+          data as unknown as ProductDetailRow
+        );
+      } catch (error) {
+        if (!active) return;
+
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Detail produk gagal dimuat."
+        );
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDetail();
+
+    return () => {
+      active = false;
+    };
+  }, [product.id]);
+
+  const isOwner =
+    currentUserId === product.creatorUserId;
+
+  async function handleContactCreator() {
+    if (
+      !currentUserId ||
+      isOwner ||
+      contactLoading
+    ) {
+      return;
+    }
+
+    setContactLoading(true);
+    setContactError("");
+
+    try {
+      const {
+        data: existing,
+        error: existingError,
+      } =
+        await supabase
+          .from("store_conversations")
+          .select("id")
+          .eq(
+            "product_key",
+            product.id
+          )
+          .eq(
+            "buyer_user_id",
+            currentUserId
+          )
+          .eq(
+            "creator_user_id",
+            product.creatorUserId
+          )
+          .maybeSingle();
+
+      if (existingError) {
+        throw existingError;
+      }
+
+      let conversationId =
+        existing?.id ?? null;
+
+      if (!conversationId) {
+        const {
+          data: authData,
+        } =
+          await supabase.auth.getUser();
+
+        const buyerName =
+          String(
+            authData.user
+              ?.user_metadata
+              ?.full_name ||
+            authData.user?.email ||
+            "Pengguna Diginaz"
+          ).trim();
+
+        const {
+          data: created,
+          error: createError,
+        } =
+          await supabase
+            .from("store_conversations")
+            .insert({
+              product_key:
+                product.id,
+              product_title:
+                product.title,
+              product_type:
+                product.type,
+              buyer_user_id:
+                currentUserId,
+              buyer_name:
+                buyerName,
+              creator_user_id:
+                product.creatorUserId,
+              creator_name:
+                product.author,
+            })
+            .select("id")
+            .single();
+
+        if (createError) {
+          if (
+            createError.code ===
+            "23505"
+          ) {
+            const {
+              data: raced,
+              error: raceError,
+            } =
+              await supabase
+                .from(
+                  "store_conversations"
+                )
+                .select("id")
+                .eq(
+                  "product_key",
+                  product.id
+                )
+                .eq(
+                  "buyer_user_id",
+                  currentUserId
+                )
+                .eq(
+                  "creator_user_id",
+                  product.creatorUserId
+                )
+                .single();
+
+            if (raceError) {
+              throw raceError;
+            }
+
+            conversationId =
+              raced.id;
+          } else {
+            throw createError;
+          }
+        } else {
+          conversationId =
+            created.id;
+        }
+      }
+
+      if (!conversationId) {
+        throw new Error(
+          "Percakapan belum dapat dibuat."
+        );
+      }
+
+      const {
+        error: trackingError,
+      } =
+        await supabase
+          .from(
+            "store_product_events"
+          )
+          .insert({
+            product_id:
+              product.id,
+            user_id:
+              currentUserId,
+            event_type:
+              "contact_creator",
+            source:
+              "mobile",
+            metadata: {
+              conversation_id:
+                conversationId,
+            },
+          });
+
+      if (trackingError) {
+        console.warn(
+          "Tracking contact_creator gagal:",
+          trackingError
+        );
+      }
+
+      onOpenChat(
+        conversationId
+      );
+    } catch (error) {
+      console.error(
+        "Gagal membuka chat:",
+        error
+      );
+
+      setContactError(
+        error instanceof Error
+          ? error.message
+          : "Chat belum dapat dibuka."
+      );
+    } finally {
+      setContactLoading(false);
+    }
+  }
+
+  async function handleShare() {
+    try {
+      await Share.share({
+        message:
+          `${product.title}\n` +
+          `${product.subject} · ${product.level}\n` +
+          `Oleh ${product.author}\n` +
+          `${product.price}\n\n` +
+          "Tersedia di Diginaz Store.",
+      });
+    } catch (error) {
+      console.warn(
+        "Bagikan produk gagal:",
+        error
+      );
+    }
+  }
+
+  return (
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={["top"]}
+    >
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="#F8FAFC"
+      />
+
+      <View style={styles.header}>
+        <Pressable
+          style={styles.headerButton}
+          onPress={onBack}
+        >
+          <ArrowLeft
+            size={20}
+            color="#0F172A"
+          />
+        </Pressable>
+
+        <Text style={styles.headerTitle}>
+          Detail Produk
+        </Text>
+
+        <Pressable
+          style={styles.headerButton}
+          onPress={handleShare}
+        >
+          <Share2
+            size={19}
+            color="#0F172A"
+          />
+        </Pressable>
+      </View>
+
+      {loading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator
+            size="small"
+            color="#2563EB"
+          />
+
+          <Text style={styles.stateText}>
+            Memuat detail produk...
+          </Text>
+        </View>
+      ) : errorMessage ? (
+        <View style={styles.centerState}>
+          <Text style={styles.errorText}>
+            Detail produk belum dapat dimuat.
+          </Text>
+
+          <Pressable
+            style={styles.backToStoreButton}
+            onPress={onBack}
+          >
+            <Text
+              style={styles.backToStoreText}
+            >
+              Kembali ke Store
+            </Text>
+          </Pressable>
+        </View>
+      ) : (
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={
+            styles.content
+          }
+        >
+          <View style={styles.thumbnail}>
+            {product.thumbnailUrl ? (
+              <Image
+                source={{
+                  uri: product.thumbnailUrl,
+                }}
+                style={styles.thumbnailImage}
+                resizeMode="cover"
+              />
+            ) : (
+              <BookOpen
+                size={48}
+                color="#8FA8D8"
+                strokeWidth={1.4}
+              />
+            )}
+
+            <View style={styles.typeBadge}>
+              <Text
+                style={styles.typeBadgeText}
+              >
+                {product.type}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.mainInfo}>
+
+            <Text style={styles.title}>
+              {product.title}
+            </Text>
+
+            <Text style={styles.creator}>
+              Oleh {product.author}
+            </Text>
+
+            <View style={styles.summaryRow}>
+              <View style={styles.rating}>
+                <Star
+                  size={15}
+                  color="#F3B63F"
+                  fill="#F3B63F"
+                />
+
+                <Text
+                  style={styles.ratingText}
+                >
+                  {product.reviewCount > 0
+                    ? `${product.rating} (${product.reviewCount})`
+                    : "Belum ada ulasan"}
+                </Text>
+              </View>
+
+              <Text
+                style={[
+                  styles.price,
+                  product.price ===
+                    "Gratis" &&
+                    styles.freePrice,
+                ]}
+              >
+                {product.price}
+              </Text>
+            </View>
+          </View>
+
+          {!isOwner ? (
+            <>
+              <Pressable
+                onPress={
+                  handleContactCreator
+                }
+                disabled={
+                  contactLoading
+                }
+                style={[
+                  styles.contactButton,
+                  contactLoading &&
+                    styles.contactButtonDisabled,
+                ]}
+              >
+                {contactLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                  />
+                ) : (
+                  <>
+                    <MessageCircle
+                      size={18}
+                      color="#FFFFFF"
+                    />
+
+                    <Text
+                      style={
+                        styles.contactButtonText
+                      }
+                    >
+                      Hubungi Kreator
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              {contactError ? (
+                <Text
+                  style={
+                    styles.contactError
+                  }
+                >
+                  {contactError}
+                </Text>
+              ) : null}
+
+              <View style={styles.safetyBox}>
+              <View style={styles.safetyIcon}>
+                <ShieldCheck
+                  size={20}
+                  color="#2563EB"
+                />
+              </View>
+
+              <View style={styles.safetyContent}>
+                <Text
+                  style={styles.safetyTitle}
+                >
+                  Tetap berhati-hati saat
+                  bertransaksi
+                </Text>
+
+                <Text
+                  style={styles.safetyText}
+                >
+                  Transaksi dilakukan langsung
+                  antara pembeli dan kreator.
+                  Diginaz tidak memproses atau
+                  menyimpan pembayaran. Periksa
+                  detail produk dan kreator sebelum
+                  melakukan pembayaran.
+                </Text>
+              </View>
+            </View>
+            </>
+          ) : null}
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              Deskripsi
+            </Text>
+
+            <Text
+              style={styles.description}
+            >
+              {detail?.description?.trim() ||
+                "Kreator belum menambahkan deskripsi produk."}
+            </Text>
+          </View>
+
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              Informasi Produk
+            </Text>
+
+            <View style={styles.infoRows}>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>
+                  Jenis
+                </Text>
+
+                <Text style={styles.infoValue}>
+                  {product.type}
+                </Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>
+                  Mata pelajaran
+                </Text>
+
+                <Text style={styles.infoValue}>
+                  {product.subject}
+                </Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>
+                  Kelas
+                </Text>
+
+                <Text style={styles.infoValue}>
+                  {product.level}
+                </Text>
+              </View>
+
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>
+                  Kreator
+                </Text>
+
+                <Text style={styles.infoValue}>
+                  {product.author}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <ProductReviewsSection
+            productId={product.id}
+            creatorUserId={
+              product.creatorUserId
+            }
+          />
+
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "#F8FAFC",
+  },
+
+  header: {
+    height: 62,
+    paddingHorizontal: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+  },
+
+  headerButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F8FAFC",
+  },
+
+  headerTitle: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 13,
+    color: "#0F172A",
+  },
+
+  centerState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    paddingHorizontal: 24,
+  },
+
+  stateText: {
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 10.5,
+    color: "#64748B",
+  },
+
+  errorText: {
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 10.5,
+    color: "#B91C1C",
+  },
+
+  backToStoreButton: {
+    minHeight: 38,
+    paddingHorizontal: 16,
+    borderRadius: 11,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  backToStoreText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 9.5,
+    color: "#2563EB",
+  },
+
+  content: {
+    paddingBottom: 40,
+  },
+
+  thumbnail: {
+    width: "100%",
+    aspectRatio: 4 / 5,
+    maxHeight: 430,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  thumbnailImage: {
+    width: "100%",
+    height: "100%",
+  },
+
+  typeBadge: {
+    position: "absolute",
+    top: 14,
+    left: 14,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    backgroundColor:
+      "rgba(255,255,255,0.93)",
+  },
+
+  typeBadgeText: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 9,
+    color: "#2563EB",
+  },
+
+  mainInfo: {
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+
+
+  title: {
+    marginTop: 4,
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 23,
+    lineHeight: 29,
+    color: "#0F172A",
+  },
+
+  creator: {
+    marginTop: 4,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: "#64748B",
+  },
+
+  summaryRow: {
+    marginTop: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+
+  rating: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
+  ratingText: {
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 12,
+    color: "#64748B",
+  },
+
+  price: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 18,
+    color: "#0F172A",
+  },
+
+  freePrice: {
+    color: "#16A34A",
+  },
+
+  contactButton: {
+    minHeight: 44,
+    marginHorizontal: 16,
+    marginTop: 14,
+    borderRadius: 12,
+    backgroundColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+
+  contactButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  contactButtonText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11.5,
+    color: "#FFFFFF",
+  },
+
+  contactError: {
+    marginHorizontal: 16,
+    marginTop: 6,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: "#DC2626",
+  },
+
+  safetyBox: {
+    marginHorizontal: 16,
+    marginTop: 20,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: "#EFF6FF",
+    borderWidth: 1,
+    borderColor: "#DBEAFE",
+    flexDirection: "row",
+    gap: 11,
+  },
+
+  safetyIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  safetyContent: {
+    flex: 1,
+  },
+
+  safetyTitle: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 10,
+    color: "#1E3A8A",
+  },
+
+  safetyText: {
+    marginTop: 5,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 9,
+    lineHeight: 15,
+    color: "#475569",
+  },
+
+  section: {
+    marginHorizontal: 16,
+    marginTop: 18,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+
+  sectionTitle: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 14,
+    color: "#0F172A",
+  },
+
+  description: {
+    marginTop: 7,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 12,
+    lineHeight: 19,
+    color: "#475569",
+  },
+
+  infoRows: {
+    marginTop: 8,
+    gap: 8,
+  },
+
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+
+  infoLabel: {
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11.5,
+    color: "#94A3B8",
+  },
+
+  infoValue: {
+    flex: 1,
+    textAlign: "right",
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11.5,
+    color: "#334155",
+  },
+});

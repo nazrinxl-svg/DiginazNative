@@ -1,0 +1,1142 @@
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  Vibration,
+  View,
+} from "react-native";
+
+import {
+  ArrowLeft,
+  CheckCheck,
+  Send,
+} from "lucide-react-native";
+
+import {
+  SafeAreaView,
+} from "react-native-safe-area-context";
+
+import {
+  supabase,
+} from "../lib/supabase";
+
+type ConversationRow = {
+  id: string;
+  product_key: string;
+  product_title: string;
+  product_type: string | null;
+  buyer_user_id: string;
+  buyer_name: string;
+  creator_user_id: string;
+  creator_name: string;
+  created_at: string;
+};
+
+type MessageRow = {
+  id: string;
+  conversation_id: string;
+  sender_user_id: string;
+  body: string;
+  created_at: string;
+  read_at: string | null;
+  reply_to_message_id: string | null;
+};
+
+type Props = {
+  conversationId: string;
+  onBack: () => void;
+};
+
+function formatTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat(
+      "id-ID",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    ).format(new Date(value));
+  } catch {
+    return "";
+  }
+}
+
+export default function ChatScreen({
+  conversationId,
+  onBack,
+}: Props) {
+  const scrollRef =
+    useRef<ScrollView | null>(null);
+
+  const [
+    currentUserId,
+    setCurrentUserId,
+  ] =
+    useState<string | null>(null);
+
+  const [
+    conversation,
+    setConversation,
+  ] =
+    useState<ConversationRow | null>(
+      null
+    );
+
+  const [
+    messages,
+    setMessages,
+  ] =
+    useState<MessageRow[]>([]);
+
+  const [
+    replyingTo,
+    setReplyingTo,
+  ] =
+    useState<MessageRow | null>(null);
+
+  const swipeReplyRef =
+    useRef<{
+      messageId: string;
+      startX: number;
+      triggered: boolean;
+    } | null>(null);
+
+  const [
+    swipeReply,
+    setSwipeReply,
+  ] =
+    useState<{
+      messageId: string | null;
+      offset: number;
+    }>({
+      messageId: null,
+      offset: 0,
+    });
+
+  const [
+    messageText,
+    setMessageText,
+  ] = useState("");
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    sending,
+    setSending,
+  ] = useState(false);
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadChat() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const {
+          data: userData,
+          error: userError,
+        } =
+          await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        const userId =
+          userData.user?.id;
+
+        if (!userId) {
+          throw new Error(
+            "Session pengguna tidak ditemukan."
+          );
+        }
+
+        const {
+          data: conversationData,
+          error: conversationError,
+        } =
+          await supabase
+            .from(
+              "store_conversations"
+            )
+            .select(
+              "id,product_key,product_title,product_type,buyer_user_id,buyer_name,creator_user_id,creator_name,created_at"
+            )
+            .eq(
+              "id",
+              conversationId
+            )
+            .single();
+
+        if (conversationError) {
+          throw conversationError;
+        }
+
+        const {
+          data: messageData,
+          error: messageError,
+        } =
+          await supabase
+            .from(
+              "store_messages"
+            )
+            .select(
+              "id,conversation_id,sender_user_id,body,created_at,read_at,reply_to_message_id"
+            )
+            .eq(
+              "conversation_id",
+              conversationId
+            )
+            .order(
+              "created_at",
+              {
+                ascending: true,
+              }
+            );
+
+        if (messageError) {
+          throw messageError;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        const conversationRow =
+          conversationData as unknown as ConversationRow;
+
+        const messageRows =
+          (messageData ?? []) as unknown as MessageRow[];
+
+        setCurrentUserId(userId);
+        setConversation(
+          conversationRow
+        );
+        setMessages(messageRows);
+
+        const {
+          error: markReadError,
+        } =
+          await supabase.rpc(
+            "store_mark_conversation_read",
+            {
+              p_conversation_id:
+                conversationId,
+            }
+          );
+
+        if (markReadError) {
+          console.error(
+            "Gagal menandai chat dibaca:",
+            markReadError
+          );
+        }
+      } catch (error) {
+        console.error(
+          "Gagal memuat chat:",
+          error
+        );
+
+        if (active) {
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Chat belum dapat dimuat."
+          );
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadChat();
+
+    const channel =
+      supabase
+        .channel(
+          `store-chat-${conversationId}`
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table:
+              "store_messages",
+            filter:
+              `conversation_id=eq.${conversationId}`,
+          },
+          (payload) => {
+            const incoming =
+              payload.new as unknown as MessageRow;
+
+            void supabase.rpc(
+              "store_mark_conversation_read",
+              {
+                p_conversation_id:
+                  conversationId,
+              }
+            );
+
+            setMessages(
+              (current) => {
+                if (
+                  current.some(
+                    (item) =>
+                      item.id ===
+                      incoming.id
+                  )
+                ) {
+                  return current;
+                }
+
+                return [
+                  ...current,
+                  incoming,
+                ];
+              }
+            );
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "store_messages",
+            filter:
+              `conversation_id=eq.${conversationId}`,
+          },
+          (payload) => {
+            const updated =
+              payload.new as unknown as MessageRow;
+
+            setMessages((current) =>
+              current.map((item) =>
+                item.id === updated.id
+                  ? updated
+                  : item
+              )
+            );
+          }
+        )
+        .subscribe();
+
+    return () => {
+      active = false;
+
+      void supabase.removeChannel(
+        channel
+      );
+    };
+  }, [conversationId]);
+
+  async function handleSend() {
+    const body =
+      messageText.trim();
+
+    if (
+      !body ||
+      !currentUserId ||
+      sending
+    ) {
+      return;
+    }
+
+    setSending(true);
+    setErrorMessage("");
+
+    try {
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from("store_messages")
+          .insert({
+            conversation_id:
+              conversationId,
+            sender_user_id:
+              currentUserId,
+            body,
+            reply_to_message_id:
+              replyingTo?.id ?? null,
+          })
+          .select(
+            "id,conversation_id,sender_user_id,body,created_at,read_at,reply_to_message_id"
+          )
+          .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const inserted =
+        data as unknown as MessageRow;
+
+      setMessages(
+        (current) => {
+          if (
+            current.some(
+              (item) =>
+                item.id ===
+                inserted.id
+            )
+          ) {
+            return current;
+          }
+
+          return [
+            ...current,
+            inserted,
+          ];
+        }
+      );
+
+      setMessageText("");
+      setReplyingTo(null);
+    } catch (error) {
+      console.error(
+        "Gagal mengirim pesan:",
+        error
+      );
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Pesan belum dapat dikirim."
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const otherName =
+    conversation
+      ? currentUserId ===
+        conversation.creator_user_id
+        ? conversation.buyer_name
+        : conversation.creator_name
+      : "Chat";
+
+  return (
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={["top", "bottom"]}
+    >
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="#FFFFFF"
+      />
+
+      <KeyboardAvoidingView
+        style={styles.page}
+        behavior={
+          Platform.OS === "ios"
+            ? "padding"
+            : "height"
+        }
+        keyboardVerticalOffset={0}
+      >
+        <View style={styles.header}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={8}
+            style={styles.backButton}
+          >
+            <ArrowLeft
+              size={21}
+              color="#0F172A"
+            />
+          </Pressable>
+
+          <View style={styles.headerText}>
+            <Text
+              style={styles.headerTitle}
+              numberOfLines={1}
+            >
+              {otherName}
+            </Text>
+
+            <Text
+              style={
+                styles.headerSubtitle
+              }
+              numberOfLines={1}
+            >
+              {conversation
+                ?.product_title ??
+                "Diginaz Store"}
+            </Text>
+          </View>
+        </View>
+
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator
+              size="small"
+              color="#2563EB"
+            />
+
+            <Text style={styles.stateText}>
+              Memuat percakapan...
+            </Text>
+          </View>
+        ) : (
+          <>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.messageList}
+              contentContainerStyle={
+                styles.messageContent
+              }
+              keyboardShouldPersistTaps="always"
+              disableScrollViewPanResponder={true}
+              onContentSizeChange={() =>
+                scrollRef.current
+                  ?.scrollToEnd({
+                    animated: true,
+                  })
+              }
+            >
+              {messages.length === 0 ? (
+                <View style={styles.empty}>
+                  <Text
+                    style={
+                      styles.emptyTitle
+                    }
+                  >
+                    Mulai percakapan
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.emptyText
+                    }
+                  >
+                    Tanyakan detail produk
+                    langsung kepada kreator.
+                  </Text>
+                </View>
+              ) : (
+                messages.map(
+                  (message) => {
+                    const mine =
+                      message
+                        .sender_user_id ===
+                      currentUserId;
+
+                    const repliedMessage =
+                      message.reply_to_message_id
+                        ? messages.find(
+                            (item) =>
+                              item.id ===
+                              message.reply_to_message_id
+                          ) ?? null
+                        : null;
+
+                    return (
+                      <View
+                        key={message.id}
+                        style={[
+                          styles.messageRow,
+                          mine
+                            ? styles.rowMine
+                            : styles.rowOther,
+                        ]}
+                      >
+                        <Pressable
+                          onPressIn={() =>
+                            Vibration.vibrate(20)
+                          }
+                          onPress={() =>
+                            setReplyingTo(message)
+                          }
+                          onLongPress={() =>
+                            setReplyingTo(message)
+                          }
+                          delayLongPress={300}
+                          onTouchStart={(event) => {
+                            swipeReplyRef.current = {
+                              messageId: message.id,
+                              startX:
+                                event.nativeEvent.pageX,
+                              triggered: false,
+                            };
+                          }}
+                          onTouchMove={(event) => {
+                            const swipe =
+                              swipeReplyRef.current;
+
+                            if (
+                              !swipe ||
+                              swipe.messageId !==
+                                message.id
+                            ) {
+                              return;
+                            }
+
+                            const delta =
+                              Math.max(
+                                0,
+                                Math.min(
+                                  42,
+                                  event.nativeEvent.pageX -
+                                    swipe.startX
+                                )
+                              );
+
+                            setSwipeReply({
+                              messageId: message.id,
+                              offset: delta,
+                            });
+
+                            if (
+                              delta >= 34 &&
+                              !swipe.triggered
+                            ) {
+                              swipe.triggered = true;
+
+                              Vibration.vibrate(25);
+                              setReplyingTo(message);
+                            }
+                          }}
+                          onTouchEnd={() => {
+                            swipeReplyRef.current =
+                              null;
+
+                            setSwipeReply({
+                              messageId: null,
+                              offset: 0,
+                            });
+                          }}
+                          onTouchCancel={() => {
+                            swipeReplyRef.current =
+                              null;
+
+                            setSwipeReply({
+                              messageId: null,
+                              offset: 0,
+                            });
+                          }}
+                          style={({ pressed }) => [
+                            styles.bubble,
+                            mine
+                              ? styles.bubbleMine
+                              : styles.bubbleOther,
+                            pressed &&
+                              styles.bubblePressed,
+                            swipeReply.messageId ===
+                              message.id && {
+                              transform: [
+                                {
+                                  translateX:
+                                    swipeReply.offset,
+                                },
+                              ],
+                            },
+                          ]}
+                        >
+                          {repliedMessage ? (
+                            <View
+                              style={[
+                                styles.replyQuote,
+                                mine &&
+                                  styles.replyQuoteMine,
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.replyQuoteText,
+                                  mine &&
+                                    styles.replyQuoteTextMine,
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {repliedMessage.body}
+                              </Text>
+                            </View>
+                          ) : null}
+
+                          
+                            <Text
+                              style={[
+                                styles.messageBody,
+                                mine &&
+                                  styles.messageBodyMine,
+                              ]}
+                            >
+                              {message.body}
+                            </Text>
+
+                          <View style={styles.messageMeta}>
+                            <Text
+                              style={[
+                                styles.time,
+                                mine &&
+                                  styles.timeMine,
+                              ]}
+                            >
+                              {formatTime(
+                                message.created_at
+                              )}
+                            </Text>
+
+                            {mine ? (
+                              <CheckCheck
+                                size={14}
+                                strokeWidth={2}
+                                color={
+                                  message.read_at
+                                    ? "#2563EB"
+                                    : "#94A3B8"
+                                }
+                              />
+                            ) : null}
+                          </View>
+                        </Pressable>
+                      </View>
+                    );
+                  }
+                )
+              )}
+            </ScrollView>
+
+            {errorMessage ? (
+              <Text
+                style={
+                  styles.errorText
+                }
+              >
+                {errorMessage}
+              </Text>
+            ) : null}
+
+            {replyingTo ? (
+              <View style={styles.replyComposer}>
+                <View
+                  style={
+                    styles.replyComposerContent
+                  }
+                >
+                  <Text
+                    style={
+                      styles.replyComposerTitle
+                    }
+                  >
+                    Membalas pesan
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.replyComposerText
+                    }
+                    numberOfLines={1}
+                  >
+                    {replyingTo.body}
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={() =>
+                    setReplyingTo(null)
+                  }
+                  hitSlop={8}
+                  style={styles.replyClose}
+                >
+                  <Text
+                    style={
+                      styles.replyCloseText
+                    }
+                  >
+                    ×
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
+
+            <View style={styles.composer}>
+              <TextInput
+                value={messageText}
+                onChangeText={
+                  setMessageText
+                }
+                placeholder="Tulis pesan..."
+                placeholderTextColor="#94A3B8"
+                multiline
+                maxLength={2000}
+                style={
+                  styles.composerInput
+                }
+              />
+
+              <Pressable
+                onPress={handleSend}
+                disabled={
+                  !messageText.trim() ||
+                  sending
+                }
+                style={[
+                  styles.sendButton,
+                  (
+                    !messageText.trim() ||
+                    sending
+                  ) &&
+                    styles.sendDisabled,
+                ]}
+              >
+                {sending ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                  />
+                ) : (
+                  <Send
+                    size={18}
+                    color="#FFFFFF"
+                  />
+                )}
+              </Pressable>
+            </View>
+          </>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles =
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: "#F8FAFC",
+    },
+
+    page: {
+      flex: 1,
+    },
+
+    header: {
+      minHeight: 62,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      borderBottomWidth: 1,
+      borderBottomColor: "#E2E8F0",
+      backgroundColor: "#FFFFFF",
+    },
+
+    backButton: {
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    headerText: {
+      flex: 1,
+      paddingRight: 14,
+    },
+
+    headerTitle: {
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+      fontSize: 13.5,
+      color: "#0F172A",
+    },
+
+    headerSubtitle: {
+      marginTop: 2,
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#64748B",
+    },
+
+    center: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+
+    stateText: {
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#64748B",
+    },
+
+    messageList: {
+      flex: 1,
+    },
+
+    messageContent: {
+      flexGrow: 1,
+      paddingHorizontal: 14,
+      paddingTop: 14,
+      paddingBottom: 18,
+    },
+
+    empty: {
+      flex: 1,
+      minHeight: 300,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 40,
+    },
+
+    emptyTitle: {
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+      fontSize: 13,
+      color: "#0F172A",
+    },
+
+    emptyText: {
+      marginTop: 5,
+      textAlign: "center",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 16,
+      color: "#64748B",
+    },
+
+    messageRow: {
+      width: "100%",
+      marginBottom: 3,
+    },
+
+    rowMine: {
+      alignItems: "flex-end",
+    },
+
+    rowOther: {
+      alignItems: "flex-start",
+    },
+
+    bubble: {
+      maxWidth: "82%",
+      paddingHorizontal: 11,
+      paddingTop: 8,
+      paddingBottom: 6,
+      borderRadius: 14,
+    },
+
+    bubblePressed: {
+      opacity: 0.82,
+      transform: [
+        {
+          scale: 0.985,
+        },
+      ],
+    },
+
+    bubbleMine: {
+      backgroundColor: "#2563EB",
+      borderBottomRightRadius: 4,
+    },
+
+    bubbleOther: {
+      backgroundColor: "#FFFFFF",
+      borderWidth: 1,
+      borderColor: "#E2E8F0",
+      borderBottomLeftRadius: 4,
+    },
+
+    messageBody: {
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 14,
+      lineHeight: 20,
+      color: "#0F172A",
+    },
+
+    messageBodyMine: {
+      color: "#FFFFFF",
+    },
+
+    time: {
+      alignSelf: "flex-end",
+      marginTop: 3,
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 17,
+      color: "#94A3B8",
+    },
+
+    timeMine: {
+      color:
+        "rgba(255,255,255,0.72)",
+    },
+
+    errorText: {
+      paddingHorizontal: 14,
+      paddingVertical: 5,
+      backgroundColor: "#FFFFFF",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#DC2626",
+    },    messageMeta: {
+      marginTop: 3,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 4,
+    },
+
+    replyQuote: {
+      marginBottom: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      borderLeftWidth: 3,
+      borderLeftColor: "#2563EB",
+      borderRadius: 6,
+      backgroundColor: "#F1F5F9",
+    },
+
+    replyQuoteMine: {
+      borderLeftColor: "#BFDBFE",
+      backgroundColor:
+        "rgba(255,255,255,0.16)",
+    },
+
+    replyQuoteText: {
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 16,
+      color: "#475569",
+    },
+
+    replyQuoteTextMine: {
+      color: "#E0ECFF",
+    },
+
+    replyComposer: {
+      marginHorizontal: 10,
+      marginTop: 6,
+      marginBottom: 4,
+      paddingVertical: 10,
+      paddingLeft: 12,
+      paddingRight: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      borderWidth: 1,
+      borderColor: "#DBEAFE",
+      borderRadius: 14,
+      backgroundColor: "#EFF6FF",
+    },
+
+    replyComposerContent: {
+      flex: 1,
+      minWidth: 0,
+      paddingLeft: 10,
+      borderLeftWidth: 3,
+      borderLeftColor: "#2563EB",
+    },
+
+    replyComposerTitle: {
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+      fontSize: 13,
+      lineHeight: 18,
+      color: "#2563EB",
+    },
+
+    replyComposerText: {
+      marginTop: 2,
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 13,
+      lineHeight: 18,
+      color: "#475569",
+    },
+
+    replyClose: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 1,
+      borderColor: "#BFDBFE",
+      backgroundColor: "#FFFFFF",
+    },
+
+    replyCloseText: {
+      fontSize: 20,
+      lineHeight: 22,
+      color: "#64748B",
+    },
+
+    composer: {
+      minHeight: 66,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+      borderTopWidth: 1,
+      borderTopColor: "#E2E8F0",
+      backgroundColor: "#FFFFFF",
+    },
+
+    composerInput: {
+      flex: 1,
+      minHeight: 44,
+      maxHeight: 110,
+      paddingHorizontal: 12,
+      paddingTop: 11,
+      paddingBottom: 10,
+      borderWidth: 1,
+      borderColor: "#E2E8F0",
+      borderRadius: 14,
+      backgroundColor: "#F8FAFC",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 16,
+      color: "#0F172A",
+    },
+
+    sendButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "#2563EB",
+    },
+
+    sendDisabled: {
+      opacity: 0.4,
+    },
+  });

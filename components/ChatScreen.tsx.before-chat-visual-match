@@ -1,0 +1,786 @@
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
+
+import {
+  ArrowLeft,
+  Send,
+} from "lucide-react-native";
+
+import {
+  SafeAreaView,
+} from "react-native-safe-area-context";
+
+import {
+  supabase,
+} from "../lib/supabase";
+
+type ConversationRow = {
+  id: string;
+  product_key: string;
+  product_title: string;
+  product_type: string | null;
+  buyer_user_id: string;
+  buyer_name: string;
+  creator_user_id: string;
+  creator_name: string;
+  created_at: string;
+};
+
+type MessageRow = {
+  id: string;
+  conversation_id: string;
+  sender_user_id: string;
+  body: string;
+  created_at: string;
+};
+
+type Props = {
+  conversationId: string;
+  onBack: () => void;
+};
+
+function formatTime(value: string) {
+  try {
+    return new Intl.DateTimeFormat(
+      "id-ID",
+      {
+        hour: "2-digit",
+        minute: "2-digit",
+      }
+    ).format(new Date(value));
+  } catch {
+    return "";
+  }
+}
+
+export default function ChatScreen({
+  conversationId,
+  onBack,
+}: Props) {
+  const scrollRef =
+    useRef<ScrollView | null>(null);
+
+  const [
+    currentUserId,
+    setCurrentUserId,
+  ] =
+    useState<string | null>(null);
+
+  const [
+    conversation,
+    setConversation,
+  ] =
+    useState<ConversationRow | null>(
+      null
+    );
+
+  const [
+    messages,
+    setMessages,
+  ] =
+    useState<MessageRow[]>([]);
+
+  const [
+    messageText,
+    setMessageText,
+  ] = useState("");
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    sending,
+    setSending,
+  ] = useState(false);
+
+  const [
+    errorMessage,
+    setErrorMessage,
+  ] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadChat() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const {
+          data: userData,
+          error: userError,
+        } =
+          await supabase.auth.getUser();
+
+        if (userError) {
+          throw userError;
+        }
+
+        const userId =
+          userData.user?.id;
+
+        if (!userId) {
+          throw new Error(
+            "Session pengguna tidak ditemukan."
+          );
+        }
+
+        const {
+          data: conversationData,
+          error: conversationError,
+        } =
+          await supabase
+            .from(
+              "store_conversations"
+            )
+            .select(
+              "id,product_key,product_title,product_type,buyer_user_id,buyer_name,creator_user_id,creator_name,created_at"
+            )
+            .eq(
+              "id",
+              conversationId
+            )
+            .single();
+
+        if (conversationError) {
+          throw conversationError;
+        }
+
+        const {
+          data: messageData,
+          error: messageError,
+        } =
+          await supabase
+            .from(
+              "store_messages"
+            )
+            .select(
+              "id,conversation_id,sender_user_id,body,created_at"
+            )
+            .eq(
+              "conversation_id",
+              conversationId
+            )
+            .order(
+              "created_at",
+              {
+                ascending: true,
+              }
+            );
+
+        if (messageError) {
+          throw messageError;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        const conversationRow =
+          conversationData as unknown as ConversationRow;
+
+        const messageRows =
+          (messageData ?? []) as unknown as MessageRow[];
+
+        setCurrentUserId(userId);
+        setConversation(
+          conversationRow
+        );
+        setMessages(messageRows);
+      } catch (error) {
+        console.error(
+          "Gagal memuat chat:",
+          error
+        );
+
+        if (active) {
+          setErrorMessage(
+            error instanceof Error
+              ? error.message
+              : "Chat belum dapat dimuat."
+          );
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadChat();
+
+    const channel =
+      supabase
+        .channel(
+          `store-chat-${conversationId}`
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table:
+              "store_messages",
+            filter:
+              `conversation_id=eq.${conversationId}`,
+          },
+          (payload) => {
+            const incoming =
+              payload.new as unknown as MessageRow;
+
+            setMessages(
+              (current) => {
+                if (
+                  current.some(
+                    (item) =>
+                      item.id ===
+                      incoming.id
+                  )
+                ) {
+                  return current;
+                }
+
+                return [
+                  ...current,
+                  incoming,
+                ];
+              }
+            );
+          }
+        )
+        .subscribe();
+
+    return () => {
+      active = false;
+
+      void supabase.removeChannel(
+        channel
+      );
+    };
+  }, [conversationId]);
+
+  async function handleSend() {
+    const body =
+      messageText.trim();
+
+    if (
+      !body ||
+      !currentUserId ||
+      sending
+    ) {
+      return;
+    }
+
+    setSending(true);
+    setErrorMessage("");
+
+    try {
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from("store_messages")
+          .insert({
+            conversation_id:
+              conversationId,
+            sender_user_id:
+              currentUserId,
+            body,
+          })
+          .select(
+            "id,conversation_id,sender_user_id,body,created_at"
+          )
+          .single();
+
+      if (error) {
+        throw error;
+      }
+
+      const inserted =
+        data as unknown as MessageRow;
+
+      setMessages(
+        (current) => {
+          if (
+            current.some(
+              (item) =>
+                item.id ===
+                inserted.id
+            )
+          ) {
+            return current;
+          }
+
+          return [
+            ...current,
+            inserted,
+          ];
+        }
+      );
+
+      setMessageText("");
+    } catch (error) {
+      console.error(
+        "Gagal mengirim pesan:",
+        error
+      );
+
+      setErrorMessage(
+        error instanceof Error
+          ? error.message
+          : "Pesan belum dapat dikirim."
+      );
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const otherName =
+    conversation
+      ? currentUserId ===
+        conversation.creator_user_id
+        ? conversation.buyer_name
+        : conversation.creator_name
+      : "Chat";
+
+  return (
+    <SafeAreaView
+      style={styles.safeArea}
+      edges={["top", "bottom"]}
+    >
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor="#FFFFFF"
+      />
+
+      <KeyboardAvoidingView
+        style={styles.page}
+        behavior={
+          Platform.OS === "ios"
+            ? "padding"
+            : undefined
+        }
+      >
+        <View style={styles.header}>
+          <Pressable
+            onPress={onBack}
+            hitSlop={8}
+            style={styles.backButton}
+          >
+            <ArrowLeft
+              size={21}
+              color="#0F172A"
+            />
+          </Pressable>
+
+          <View style={styles.headerText}>
+            <Text
+              style={styles.headerTitle}
+              numberOfLines={1}
+            >
+              {otherName}
+            </Text>
+
+            <Text
+              style={
+                styles.headerSubtitle
+              }
+              numberOfLines={1}
+            >
+              {conversation
+                ?.product_title ??
+                "Diginaz Store"}
+            </Text>
+          </View>
+        </View>
+
+        {loading ? (
+          <View style={styles.center}>
+            <ActivityIndicator
+              size="small"
+              color="#2563EB"
+            />
+
+            <Text style={styles.stateText}>
+              Memuat percakapan...
+            </Text>
+          </View>
+        ) : (
+          <>
+            <ScrollView
+              ref={scrollRef}
+              style={styles.messageList}
+              contentContainerStyle={
+                styles.messageContent
+              }
+              keyboardShouldPersistTaps="handled"
+              onContentSizeChange={() =>
+                scrollRef.current
+                  ?.scrollToEnd({
+                    animated: true,
+                  })
+              }
+            >
+              {messages.length === 0 ? (
+                <View style={styles.empty}>
+                  <Text
+                    style={
+                      styles.emptyTitle
+                    }
+                  >
+                    Mulai percakapan
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.emptyText
+                    }
+                  >
+                    Tanyakan detail produk
+                    langsung kepada kreator.
+                  </Text>
+                </View>
+              ) : (
+                messages.map(
+                  (message) => {
+                    const mine =
+                      message
+                        .sender_user_id ===
+                      currentUserId;
+
+                    return (
+                      <View
+                        key={message.id}
+                        style={[
+                          styles.messageRow,
+                          mine
+                            ? styles.rowMine
+                            : styles.rowOther,
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.bubble,
+                            mine
+                              ? styles.bubbleMine
+                              : styles.bubbleOther,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.messageBody,
+                              mine &&
+                                styles.messageBodyMine,
+                            ]}
+                          >
+                            {message.body}
+                          </Text>
+
+                          <Text
+                            style={[
+                              styles.time,
+                              mine &&
+                                styles.timeMine,
+                            ]}
+                          >
+                            {formatTime(
+                              message.created_at
+                            )}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  }
+                )
+              )}
+            </ScrollView>
+
+            {errorMessage ? (
+              <Text
+                style={
+                  styles.errorText
+                }
+              >
+                {errorMessage}
+              </Text>
+            ) : null}
+
+            <View style={styles.composer}>
+              <TextInput
+                value={messageText}
+                onChangeText={
+                  setMessageText
+                }
+                placeholder="Tulis pesan..."
+                placeholderTextColor="#94A3B8"
+                multiline
+                maxLength={2000}
+                style={
+                  styles.composerInput
+                }
+              />
+
+              <Pressable
+                onPress={handleSend}
+                disabled={
+                  !messageText.trim() ||
+                  sending
+                }
+                style={[
+                  styles.sendButton,
+                  (
+                    !messageText.trim() ||
+                    sending
+                  ) &&
+                    styles.sendDisabled,
+                ]}
+              >
+                {sending ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                  />
+                ) : (
+                  <Send
+                    size={18}
+                    color="#FFFFFF"
+                  />
+                )}
+              </Pressable>
+            </View>
+          </>
+        )}
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles =
+  StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: "#F8FAFC",
+    },
+
+    page: {
+      flex: 1,
+    },
+
+    header: {
+      minHeight: 62,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      borderBottomWidth: 1,
+      borderBottomColor: "#E2E8F0",
+      backgroundColor: "#FFFFFF",
+    },
+
+    backButton: {
+      width: 40,
+      height: 40,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    headerText: {
+      flex: 1,
+      paddingRight: 14,
+    },
+
+    headerTitle: {
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+      fontSize: 13.5,
+      color: "#0F172A",
+    },
+
+    headerSubtitle: {
+      marginTop: 2,
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#64748B",
+    },
+
+    center: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+    },
+
+    stateText: {
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#64748B",
+    },
+
+    messageList: {
+      flex: 1,
+    },
+
+    messageContent: {
+      flexGrow: 1,
+      paddingHorizontal: 14,
+      paddingTop: 14,
+      paddingBottom: 18,
+    },
+
+    empty: {
+      flex: 1,
+      minHeight: 300,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 40,
+    },
+
+    emptyTitle: {
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+      fontSize: 13,
+      color: "#0F172A",
+    },
+
+    emptyText: {
+      marginTop: 5,
+      textAlign: "center",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 16,
+      color: "#64748B",
+    },
+
+    messageRow: {
+      width: "100%",
+      marginBottom: 7,
+    },
+
+    rowMine: {
+      alignItems: "flex-end",
+    },
+
+    rowOther: {
+      alignItems: "flex-start",
+    },
+
+    bubble: {
+      maxWidth: "82%",
+      paddingHorizontal: 11,
+      paddingTop: 8,
+      paddingBottom: 6,
+      borderRadius: 14,
+    },
+
+    bubbleMine: {
+      backgroundColor: "#2563EB",
+      borderBottomRightRadius: 4,
+    },
+
+    bubbleOther: {
+      backgroundColor: "#FFFFFF",
+      borderWidth: 1,
+      borderColor: "#E2E8F0",
+      borderBottomLeftRadius: 4,
+    },
+
+    messageBody: {
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 17,
+      color: "#0F172A",
+    },
+
+    messageBodyMine: {
+      color: "#FFFFFF",
+    },
+
+    time: {
+      alignSelf: "flex-end",
+      marginTop: 3,
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#94A3B8",
+    },
+
+    timeMine: {
+      color:
+        "rgba(255,255,255,0.72)",
+    },
+
+    errorText: {
+      paddingHorizontal: 14,
+      paddingVertical: 5,
+      backgroundColor: "#FFFFFF",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      color: "#DC2626",
+    },
+
+    composer: {
+      minHeight: 66,
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+      borderTopWidth: 1,
+      borderTopColor: "#E2E8F0",
+      backgroundColor: "#FFFFFF",
+    },
+
+    composerInput: {
+      flex: 1,
+      minHeight: 44,
+      maxHeight: 110,
+      paddingHorizontal: 12,
+      paddingTop: 11,
+      paddingBottom: 10,
+      borderWidth: 1,
+      borderColor: "#E2E8F0",
+      borderRadius: 14,
+      backgroundColor: "#F8FAFC",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 16,
+      color: "#0F172A",
+    },
+
+    sendButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "#2563EB",
+    },
+
+    sendDisabled: {
+      opacity: 0.4,
+    },
+  });

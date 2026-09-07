@@ -1,4 +1,4 @@
-package com.diginaznative
+package com.diginaz.store
 
 import android.app.Application
 import com.facebook.react.PackageList

@@ -1,4 +1,4 @@
-package com.diginaznative
+package com.diginaz.store
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
