@@ -20,6 +20,8 @@
     "react": "19.2.3",
     "react-native": "0.86.3",
     "react-native-image-picker": "^8.2.1",
+    "react-native-nitro-modules": "^0.37.1",
+    "react-native-nitro-sqlite": "^9.7.0",
     "react-native-safe-area-context": "^5.7.0",
     "react-native-screens": "^4.26.0",
     "react-native-svg": "^15.15.4",
