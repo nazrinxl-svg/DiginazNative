@@ -1,4 +1,7 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  readChatInboxLocal,
+  writeChatInboxLocal,
+} from "../lib/chatInboxLocal";
 import { getLocalUser } from "../lib/localAuth";
 import React, {
   useEffect,
@@ -149,35 +152,24 @@ export default function ChatInboxScreen({
 
       setCurrentUserId(userId);
 
-      const inboxCacheKey =
-        `diginaz:chat-inbox:${userId}`;
-
-      // Tampilkan cache HP lebih dulu.
-      // Network refresh tetap berjalan di belakang.
+      // Local-first: tampilkan snapshot SQLite terlebih dahulu.
+      // Supabase tetap refresh di belakang.
       if (!isRefresh) {
         try {
-          const cachedInbox =
-            await AsyncStorage.getItem(
-              inboxCacheKey
+          const localInbox =
+            readChatInboxLocal(
+              userId
             );
 
-          if (cachedInbox) {
-            const parsedInbox =
-              JSON.parse(cachedInbox);
-
-            if (Array.isArray(parsedInbox)) {
-              setItems(parsedInbox);
-              setLoading(false);
-            }
-          }
-        } catch (cacheError) {
+          setItems(localInbox);
+          setLoading(false);
+        } catch (localError) {
           console.warn(
-            "Cache inbox tidak dapat dibaca:",
-            cacheError
+            "Inbox lokal SQLite tidak dapat dibaca:",
+            localError
           );
         }
       }
-
       const {
         data: conversationData,
         error: conversationError,
@@ -209,6 +201,19 @@ export default function ChatInboxScreen({
         conversations.length === 0
       ) {
         setItems([]);
+
+        try {
+          writeChatInboxLocal(
+            userId,
+            []
+          );
+        } catch (localError) {
+          console.warn(
+            "Inbox lokal SQLite tidak dapat dikosongkan:",
+            localError
+          );
+        }
+
         return;
       }
 
@@ -296,14 +301,14 @@ export default function ChatInboxScreen({
       setItems(nextItems);
 
       try {
-        await AsyncStorage.setItem(
-          inboxCacheKey,
-          JSON.stringify(nextItems)
+        writeChatInboxLocal(
+          userId,
+          nextItems
         );
-      } catch (cacheError) {
+      } catch (localError) {
         console.warn(
-          "Cache inbox tidak dapat disimpan:",
-          cacheError
+          "Inbox lokal SQLite tidak dapat disimpan:",
+          localError
         );
       }
     } catch (error) {
