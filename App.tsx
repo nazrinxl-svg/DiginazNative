@@ -13,6 +13,7 @@ import {
   Text,
   TextInput,
   View,
+  Share,
 } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
@@ -25,6 +26,9 @@ import {
   Search,
   Star,
   UserRound,
+  Bookmark,
+  Heart,
+  Forward as ShareIcon,
 } from "lucide-react-native";
 
 import type { Session } from "@supabase/supabase-js";
@@ -34,6 +38,7 @@ import ChatScreen from "./components/ChatScreen";
 import ChatInboxScreen from "./components/ChatInboxScreen";
 import NotificationScreen from "./components/NotificationScreen";
 import ProfileScreen from "./components/ProfileScreen";
+import PublicProfileScreen from "./components/PublicProfileScreen";
 import UploadProductScreen from "./components/UploadProductScreen";
 import { supabase } from "./lib/supabase";
 import {
@@ -46,11 +51,43 @@ import {
   writeStoreProductsCache,
 } from "./lib/storeProductCache";
 
-const SCREEN_WIDTH = Dimensions.get("window").width;
-const HORIZONTAL_PADDING = 16;
-const CARD_GAP = 12;
+const SCREEN_WIDTH =
+  Dimensions.get("window").width;
+
+const SCREEN_HEIGHT =
+  Dimensions.get("window").height;
+
+const IS_SHORT_SCREEN =
+  SCREEN_HEIGHT < 700;
+
+const HORIZONTAL_PADDING =
+  SCREEN_WIDTH <= 360 ? 12 : 16;
+
+const CARD_GAP =
+  SCREEN_WIDTH <= 360 ? 8 : 10;
+
+const WIDTH_BASED_CARD =
+  (
+    SCREEN_WIDTH -
+    HORIZONTAL_PADDING * 2 -
+    CARD_GAP
+  ) / 2;
+
+/*
+ * Menjaga dua baris thumbnail 4:5
+ * tetap masuk lebih baik pada HP pendek.
+ */
+const HEIGHT_BASED_CARD =
+  Math.max(
+    92,
+    (SCREEN_HEIGHT - 250) / 2.5
+  );
+
 const CARD_WIDTH =
-  (SCREEN_WIDTH - HORIZONTAL_PADDING * 2 - CARD_GAP) / 2;
+  Math.min(
+    WIDTH_BASED_CARD,
+    HEIGHT_BASED_CARD
+  );
 
 function ProductCard({
   product,
@@ -59,16 +96,436 @@ function ProductCard({
   product: StoreProductCardItem;
   onPress: () => void;
 }) {
+  // CARD_LOVE_SAVE_SHARE
+
+  const [
+    currentUserId,
+    setCurrentUserId,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    isLoved,
+    setIsLoved,
+  ] =
+    useState(false);
+
+  const [
+    loveCount,
+    setLoveCount,
+  ] =
+    useState(0);
+
+  const [
+    isSaved,
+    setIsSaved,
+  ] =
+    useState(false);
+
+  const [
+    loveLoading,
+    setLoveLoading,
+  ] =
+    useState(false);
+
+  const [
+    saveLoading,
+    setSaveLoading,
+  ] =
+    useState(false);
+
+
+  const isOwner =
+    currentUserId ===
+    product.creatorUserId;
+
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadActions() {
+      try {
+        const {
+          data: authData,
+          error: authError,
+        } =
+          await supabase.auth
+            .getUser();
+
+        if (authError) {
+          throw authError;
+        }
+
+        const userId =
+          authData.user?.id ??
+          null;
+
+        if (!active) {
+          return;
+        }
+
+        setCurrentUserId(
+          userId
+        );
+
+        if (!userId) {
+          return;
+        }
+
+
+        const [
+          countResult,
+          loveResult,
+          saveResult,
+        ] =
+          await Promise.all([
+            supabase
+              .from(
+                "store_product_likes"
+              )
+              .select(
+                "product_id",
+                {
+                  count: "exact",
+                  head: true,
+                }
+              )
+              .eq(
+                "product_id",
+                product.id
+              ),
+
+            supabase
+              .from(
+                "store_product_likes"
+              )
+              .select(
+                "product_id"
+              )
+              .eq(
+                "user_id",
+                userId
+              )
+              .eq(
+                "product_id",
+                product.id
+              )
+              .maybeSingle(),
+
+            supabase
+              .from(
+                "store_product_saves"
+              )
+              .select(
+                "product_id"
+              )
+              .eq(
+                "user_id",
+                userId
+              )
+              .eq(
+                "product_id",
+                product.id
+              )
+              .maybeSingle(),
+          ]);
+
+
+        if (
+          countResult.error
+        ) {
+          throw countResult.error;
+        }
+
+        if (
+          loveResult.error
+        ) {
+          throw loveResult.error;
+        }
+
+        if (
+          saveResult.error
+        ) {
+          throw saveResult.error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+
+        setLoveCount(
+          countResult.count ??
+            0
+        );
+
+        setIsLoved(
+          Boolean(
+            loveResult.data
+          )
+        );
+
+        setIsSaved(
+          Boolean(
+            saveResult.data
+          )
+        );
+
+      } catch (error) {
+        console.warn(
+          "Aksi kartu produk gagal dimuat:",
+          error
+        );
+      }
+    }
+
+
+    void loadActions();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    product.id,
+  ]);
+
+
+  async function handleLove() {
+    if (
+      !currentUserId ||
+      isOwner ||
+      loveLoading
+    ) {
+      return;
+    }
+
+
+    const previousLoved =
+      isLoved;
+
+    const previousCount =
+      loveCount;
+
+    const nextLoved =
+      !previousLoved;
+
+
+    setLoveLoading(true);
+    setIsLoved(
+      nextLoved
+    );
+
+    setLoveCount(
+      Math.max(
+        0,
+        previousCount +
+          (
+            nextLoved
+              ? 1
+              : -1
+          )
+      )
+    );
+
+
+    try {
+      if (nextLoved) {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_likes"
+            )
+            .insert({
+              user_id:
+                currentUserId,
+
+              product_id:
+                product.id,
+            });
+
+        if (error) {
+          throw error;
+        }
+
+      } else {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_likes"
+            )
+            .delete()
+            .eq(
+              "user_id",
+              currentUserId
+            )
+            .eq(
+              "product_id",
+              product.id
+            );
+
+        if (error) {
+          throw error;
+        }
+      }
+
+    } catch (error) {
+      setIsLoved(
+        previousLoved
+      );
+
+      setLoveCount(
+        previousCount
+      );
+
+      console.warn(
+        "Love kartu gagal:",
+        error
+      );
+
+    } finally {
+      setLoveLoading(false);
+    }
+  }
+
+
+  async function handleSave() {
+    if (
+      !currentUserId ||
+      saveLoading
+    ) {
+      return;
+    }
+
+
+    const previousSaved =
+      isSaved;
+
+    const nextSaved =
+      !previousSaved;
+
+
+    setSaveLoading(true);
+    setIsSaved(
+      nextSaved
+    );
+
+
+    try {
+      if (nextSaved) {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_saves"
+            )
+            .insert({
+              user_id:
+                currentUserId,
+
+              product_id:
+                product.id,
+            });
+
+        if (error) {
+          throw error;
+        }
+
+      } else {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_saves"
+            )
+            .delete()
+            .eq(
+              "user_id",
+              currentUserId
+            )
+            .eq(
+              "product_id",
+              product.id
+            );
+
+        if (error) {
+          throw error;
+        }
+      }
+
+    } catch (error) {
+      setIsSaved(
+        previousSaved
+      );
+
+      console.warn(
+        "Save kartu gagal:",
+        error
+      );
+
+    } finally {
+      setSaveLoading(false);
+    }
+  }
+
+
+  async function handleShareCard() {
+    try {
+      await Share.share({
+        message:
+          product.title +
+          "\n" +
+          product.subject +
+          " · " +
+          product.level +
+          "\n" +
+          "Oleh " +
+          product.author +
+          "\n" +
+          product.price +
+          "\n\n" +
+          "Tersedia di Diginaz Store.",
+      });
+
+    } catch (error) {
+      console.warn(
+        "Share kartu gagal:",
+        error
+      );
+    }
+  }
+
+
   return (
     <Pressable
-      style={styles.productCard}
-      onPress={onPress}
+      style={
+        styles.productCard
+      }
+      onPress={
+        onPress
+      }
     >
-      <View style={styles.thumbnail}>
+      <View
+        style={
+          styles.thumbnail
+        }
+      >
         {product.thumbnailUrl ? (
           <Image
-            source={{ uri: product.thumbnailUrl }}
-            style={styles.thumbnailImage}
+            source={{
+              uri:
+                product.thumbnailUrl,
+            }}
+            style={
+              styles.thumbnailImage
+            }
             resizeMode="cover"
           />
         ) : (
@@ -79,37 +536,77 @@ function ProductCard({
           />
         )}
 
-        <View style={styles.thumbnailBadge}>
-          <Text style={styles.thumbnailBadgeText}>
+
+        <View
+          style={
+            styles.thumbnailBadge
+          }
+        >
+          <Text
+            style={
+              styles.thumbnailBadgeText
+            }
+          >
             {product.type}
           </Text>
         </View>
       </View>
 
-      <View style={styles.productContent}>
-        <Text
-          style={styles.productMeta}
-          numberOfLines={1}
-        >
-          {product.subject} ? {product.level}
-        </Text>
 
+      <View
+        style={
+          styles.productContent
+        }
+      >
         <Text
-          style={styles.productTitle}
+          style={
+            styles.productTitle
+          }
           numberOfLines={2}
         >
           {product.title}
         </Text>
 
+
         <Text
-          style={styles.productAuthor}
+          style={
+            styles.productAuthor
+          }
           numberOfLines={1}
         >
           Oleh {product.author}
         </Text>
 
-        <View style={styles.productFooter}>
-          <View style={styles.ratingRow}>
+
+        <View
+          style={
+            styles.productFooter
+          }
+        >
+          <Text
+            style={[
+              styles.price,
+
+              product.price ===
+                "Gratis" &&
+                styles.freePrice,
+            ]}
+          >
+            {product.price}
+          </Text>
+        </View>
+
+
+        <View
+          style={
+            styles.cardActions
+          }
+        >
+          <View
+            style={
+              styles.cardRating
+            }
+          >
             <Star
               size={12}
               color="#F3B63F"
@@ -117,22 +614,111 @@ function ProductCard({
               strokeWidth={1.5}
             />
 
-            <Text style={styles.ratingText}>
+            <Text
+              style={
+                styles.ratingText
+              }
+            >
               {product.reviewCount > 0
                 ? product.rating
                 : "Baru"}
             </Text>
           </View>
 
-          <Text
-            style={[
-              styles.price,
-              product.price === "Gratis" &&
-                styles.freePrice,
-            ]}
+
+          <View
+            style={
+              styles.cardActionIcons
+            }
           >
-            {product.price}
-          </Text>
+            <Pressable
+              style={
+                styles.cardIconButton
+              }
+              onPress={event => {
+                event.stopPropagation();
+
+                if (!isOwner) {
+                  void handleLove();
+                }
+              }}
+              accessibilityLabel="Love produk"
+            >
+              {loveLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#E11D48"
+                />
+              ) : (
+                <Heart
+                  size={18}
+                  color={
+                    isLoved
+                      ? "#E11D48"
+                      : "#64748B"
+                  }
+                  fill={
+                    isLoved
+                      ? "#E11D48"
+                      : "none"
+                  }
+                  strokeWidth={1.8}
+                />
+              )}
+            </Pressable>
+
+
+            <Pressable
+              style={
+                styles.cardIconButton
+              }
+              onPress={event => {
+                event.stopPropagation();
+                void handleSave();
+              }}
+              accessibilityLabel="Save produk"
+            >
+              {saveLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#2563EB"
+                />
+              ) : (
+                <Bookmark
+                  size={18}
+                  color={
+                    isSaved
+                      ? "#2563EB"
+                      : "#64748B"
+                  }
+                  fill={
+                    isSaved
+                      ? "#2563EB"
+                      : "none"
+                  }
+                  strokeWidth={1.8}
+                />
+              )}
+            </Pressable>
+
+
+            <Pressable
+              style={
+                styles.cardIconButton
+              }
+              onPress={event => {
+                event.stopPropagation();
+                void handleShareCard();
+              }}
+              accessibilityLabel="Share produk"
+            >
+              <ShareIcon
+                size={18}
+                color="#64748B"
+                strokeWidth={1.8}
+              />
+            </Pressable>
+          </View>
         </View>
       </View>
     </Pressable>
@@ -373,6 +959,22 @@ function StoreHome() {
     useState(false);
 
   const [
+    selectedProfileUserId,
+    setSelectedProfileUserId,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    profileReturnProduct,
+    setProfileReturnProduct,
+  ] =
+    useState<StoreProductCardItem | null>(
+      null
+    );
+
+  const [
     showChatInbox,
     setShowChatInbox,
   ] = useState(false);
@@ -415,6 +1017,14 @@ function StoreHome() {
 
     setShowProfile(
       tab === "profile"
+    );
+
+    setSelectedProfileUserId(
+      null
+    );
+
+    setProfileReturnProduct(
+      null
     );
 
     setSelectedConversationId(
@@ -500,6 +1110,28 @@ function StoreHome() {
 
           return true;
         }
+        if (
+          selectedProfileUserId
+        ) {
+          setSelectedProfileUserId(
+            null
+          );
+
+          if (
+            profileReturnProduct
+          ) {
+            setSelectedProduct(
+              profileReturnProduct
+            );
+
+            setProfileReturnProduct(
+              null
+            );
+          }
+
+          return true;
+        }
+
         if (showChatInbox) {
           setShowChatInbox(false);
           return true;
@@ -523,7 +1155,7 @@ function StoreHome() {
     return () => {
       subscription.remove();
     };
-  }, [selectedConversationId, editingProductId, selectedProduct, productOpenedFromProfile, showChatInbox, showNotifications, showProfile, showUpload]);
+  }, [selectedConversationId, editingProductId, selectedProduct, selectedProfileUserId, profileReturnProduct, productOpenedFromProfile, showChatInbox, showNotifications, showProfile, showUpload]);
 
 
   async function loadProducts(
@@ -775,6 +1407,22 @@ function StoreHome() {
     return (
       <ProductDetailScreen
         product={selectedProduct}
+
+        onOpenCreatorProfile={(
+          creatorUserId
+        ) => {
+          setProfileReturnProduct(
+            selectedProduct
+          );
+
+          setSelectedProfileUserId(
+            creatorUserId
+          );
+
+          setSelectedProduct(
+            null
+          );
+        }}
         onBack={() => {
           setSelectedProduct(
             null
@@ -806,6 +1454,45 @@ function StoreHome() {
             conversationId
           )
         }
+      />
+    );
+  }
+
+
+  if (selectedProfileUserId) {
+    return (
+      <PublicProfileScreen
+        profileUserId={
+          selectedProfileUserId
+        }
+
+        products={products}
+
+        onBack={() => {
+          setSelectedProfileUserId(
+            null
+          );
+
+          if (
+            profileReturnProduct
+          ) {
+            setSelectedProduct(
+              profileReturnProduct
+            );
+
+            setProfileReturnProduct(
+              null
+            );
+          }
+        }}
+
+        onOpenProduct={(
+          product
+        ) => {
+          setSelectedProduct(
+            product
+          );
+        }}
       />
     );
   }
@@ -1074,7 +1761,7 @@ const styles = StyleSheet.create({
 
   scrollContent: {
     paddingHorizontal: HORIZONTAL_PADDING,
-    paddingTop: 8,
+    paddingTop: 4,
     paddingBottom: 104,
   },
 
@@ -1093,7 +1780,7 @@ const styles = StyleSheet.create({
   },
 
   brandSubtitle: {
-    marginTop: 3,
+    marginTop: 1,
     fontFamily: "PlusJakartaSans_400Regular",
     fontSize: 10.5,
     color: "#94A3B8",
@@ -1144,7 +1831,7 @@ const styles = StyleSheet.create({
   },
 
   searchBox: {
-    marginTop: 18,
+    marginTop: IS_SHORT_SCREEN ? 6 : 8,
     height: 46,
     borderRadius: 14,
     borderWidth: 1,
@@ -1165,10 +1852,11 @@ const styles = StyleSheet.create({
   },
 
   productGrid: {
-    marginTop: 18,
+    marginTop: IS_SHORT_SCREEN ? 6 : 8,
     flexDirection: "row",
     flexWrap: "wrap",
     gap: CARD_GAP,
+    justifyContent: "space-between",
   },
 
   productCard: {
@@ -1205,7 +1893,9 @@ const styles = StyleSheet.create({
   },
 
   productContent: {
-    padding: 10,
+    paddingHorizontal: 10,
+    paddingTop: 7,
+    paddingBottom: 5,
   },
 
   productMeta: {
@@ -1215,27 +1905,26 @@ const styles = StyleSheet.create({
   },
 
   productTitle: {
-    marginTop: 4,
-    minHeight: 34,
+    marginTop: 0,
+    minHeight: 16,
     fontSize: 11.5,
-    lineHeight: 17,
+    lineHeight: 16,
     fontFamily: "PlusJakartaSans_700Bold",
     color: "#0F172A",
   },
 
   productAuthor: {
-    marginTop: 4,
+    marginTop: 0,
     fontFamily: "PlusJakartaSans_400Regular",
     fontSize: 8.5,
     color: "#64748B",
   },
 
   productFooter: {
-    marginTop: 9,
+    marginTop: 1,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 6,
+    justifyContent: "flex-end",
   },
 
   ratingRow: {
@@ -1260,6 +1949,44 @@ const styles = StyleSheet.create({
 
   freePrice: {
     color: "#16A34A",
+  },
+
+  cardActions: {
+    marginTop: 2,
+    paddingTop: 3,
+    borderTopWidth:
+      StyleSheet.hairlineWidth,
+    borderTopColor:
+      "#E2E8F0",
+    minHeight: 34,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  cardRating: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+
+  cardActionIcons: {
+    marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 0,
+  },
+
+  cardIconButton: {
+    width: 25,
+    height: 28,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  cardActionDisabled: {
+    opacity: 0.35,
   },
 
   thumbnailImage: {

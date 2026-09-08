@@ -9,14 +9,18 @@ import {
   Text,
   TextInput,
   View,
+  Image,
 } from "react-native";
 import {
   ArrowLeft,
   FileText,
   Image as ImageIcon,
   Upload,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import ImageCropPicker from "react-native-image-crop-picker";
 import { ImagePickerCompat as ImagePicker } from "../lib/nativePickers";
 import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 
@@ -48,8 +52,29 @@ const CLASS_LEVELS = [
   "Kelas 4",
   "Kelas 5",
   "Kelas 6",
+  "Kelas 7",
+  "Kelas 8",
+  "Kelas 9",
+  "Kelas 10",
+  "Kelas 11",
+  "Kelas 12",
   "Guru",
 ];
+
+const SUBJECTS = [
+  "Pendidikan Agama Islam",
+  "Pendidikan Pancasila",
+  "Bahasa Indonesia",
+  "Matematika",
+  "IPAS",
+  "Bahasa Inggris",
+  "PJOK",
+  "Seni Budaya",
+  "Informatika",
+  "Muatan Lokal",
+  "Lainnya",
+];
+
 
 function safeFileName(value: string) {
   return value
@@ -86,11 +111,35 @@ export default function UploadProductScreen({
     useState("LKPD");
 
   const [subject, setSubject] = useState("");
+  const [
+    customSubject,
+    setCustomSubject,
+  ] = useState("");
   const [classLevel, setClassLevel] =
     useState("Kelas 1");
 
+  const [
+    showProductTypeMenu,
+    setShowProductTypeMenu,
+  ] = useState(false);
+
+  const [
+    showSubjectMenu,
+    setShowSubjectMenu,
+  ] = useState(false);
+
+  const [
+    showClassLevelMenu,
+    setShowClassLevelMenu,
+  ] = useState(false);
+
   const [pricingType, setPricingType] =
     useState<"free" | "paid">("free");
+
+  const [
+    showPricingTypeMenu,
+    setShowPricingTypeMenu,
+  ] = useState(false);
 
   const [price, setPrice] = useState("");
   const [description, setDescription] =
@@ -159,7 +208,31 @@ export default function UploadProductScreen({
         setProductType(
           data.product_type ?? "LKPD"
         );
-        setSubject(data.subject ?? "");
+        const loadedSubject =
+          data.subject ?? "";
+
+        if (
+          loadedSubject &&
+          SUBJECTS.includes(
+            loadedSubject
+          )
+        ) {
+          setSubject(
+            loadedSubject
+          );
+          setCustomSubject("");
+        } else if (
+          loadedSubject
+        ) {
+          setSubject("Lainnya");
+          setCustomSubject(
+            loadedSubject
+          );
+        } else {
+          setSubject("");
+          setCustomSubject("");
+        }
+
         setClassLevel(
           data.class_level ?? "Kelas 1"
         );
@@ -197,67 +270,189 @@ export default function UploadProductScreen({
     };
   }, [editProductId]);
 
+  const [
+    productFileKind,
+    setProductFileKind,
+  ] =
+    useState<
+      "pdf" |
+      "image" |
+      null
+    >(null);
+
+  const [
+    showProductFileKindMenu,
+    setShowProductFileKindMenu,
+  ] =
+    useState(false);
+
+
+  function selectProductFileKind(
+    kind: "pdf" | "image"
+  ) {
+    setProductFileKind(kind);
+    setShowProductFileKindMenu(false);
+                setShowPricingTypeMenu(false);
+
+    // Hindari file lama tetap terbaca
+    // setelah jenis file diganti.
+    setProductFile(null);
+
+    setErrorMessage("");
+  }
+
+
   async function chooseThumbnail() {
     setErrorMessage("");
 
-    const permission =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+    try {
+      const permission =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-    if (!permission.granted) {
-      setErrorMessage(
-        "Izin galeri diperlukan untuk memilih thumbnail."
-      );
-      return;
-    }
+      if (!permission.granted) {
+        setErrorMessage(
+          "Izin galeri diperlukan untuk memilih thumbnail."
+        );
+        return;
+      }
 
-    const result =
-      await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ["images"],
-        allowsEditing: true,
-        aspect: [4, 5],
-        quality: 0.9,
+      const image =
+        await ImageCropPicker.openPicker({
+          mediaType: "photo",
+          width: 1080,
+          height: 1350,
+          cropping: true,
+          compressImageQuality: 0.9,
+          cropperToolbarTitle:
+            "Atur Thumbnail 4:5",
+          cropperChooseText:
+            "Gunakan",
+          cropperCancelText:
+            "Batal",
+          enableRotationGesture: true,
+          freeStyleCropEnabled: false,
+        });
+
+      if (
+        !image?.path
+      ) {
+        return;
+      }
+
+      setThumbnail({
+        uri: image.path,
+        fileName:
+          `thumbnail-${Date.now()}.jpg`,
+        mimeType:
+          image.mime ??
+          "image/jpeg",
       });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "";
 
-    if (
-      result.canceled ||
-      result.assets.length === 0
-    ) {
-      return;
+      if (
+        message
+          .toLowerCase()
+          .includes("cancel")
+      ) {
+        return;
+      }
+
+      setErrorMessage(
+        "Thumbnail belum dapat dipilih."
+      );
     }
-
-    const asset = result.assets[0];
-
-    setThumbnail({
-      uri: asset.uri,
-      fileName:
-        asset.fileName ??
-        `thumbnail-${Date.now()}.jpg`,
-      mimeType:
-        asset.mimeType ??
-        "image/jpeg",
-    });
   }
 
   async function chooseProductFile() {
     setErrorMessage("");
 
-    const result =
-      await DocumentPicker.getDocumentAsync({
-        type: [
-          "application/pdf",
-          "application/vnd.ms-powerpoint",
-          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-          "application/msword",
-          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          "application/vnd.ms-excel",
-          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "application/zip",
-          "application/x-zip-compressed",
-          "application/octet-stream",
-        ],
-        copyToCacheDirectory: true,
-        multiple: false,
+    if (!productFileKind) {
+      setErrorMessage(
+        "Pilih jenis file terlebih dahulu."
+      );
+
+      return;
+    }
+
+
+    /*
+     * GAMBAR
+     * Langsung buka galeri HP.
+     */
+    if (
+      productFileKind ===
+      "image"
+    ) {
+      const permission =
+        await ImagePicker
+          .requestMediaLibraryPermissionsAsync();
+
+      if (!permission.granted) {
+        setErrorMessage(
+          "Izin galeri diperlukan untuk memilih gambar."
+        );
+
+        return;
+      }
+
+
+      const result =
+        await ImagePicker
+          .launchImageLibraryAsync({
+            mediaTypes: [
+              "images",
+            ],
+            allowsEditing: false,
+            quality: 1,
+          });
+
+
+      if (
+        result.canceled ||
+        result.assets.length === 0
+      ) {
+        return;
+      }
+
+
+      const asset =
+        result.assets[0];
+
+
+      setProductFile({
+        uri: asset.uri,
+
+        fileName:
+          asset.fileName ??
+          `produk-${Date.now()}.jpg`,
+
+        mimeType:
+          asset.mimeType ??
+          "image/jpeg",
       });
+
+      return;
+    }
+
+
+    /*
+     * PDF
+     * File manager hanya menampilkan PDF.
+     */
+    const result =
+      await DocumentPicker
+        .getDocumentAsync({
+          type: [
+            "application/pdf",
+          ],
+          copyToCacheDirectory: true,
+          multiple: false,
+        });
+
 
     if (
       result.canceled ||
@@ -266,14 +461,17 @@ export default function UploadProductScreen({
       return;
     }
 
-    const asset = result.assets[0];
+
+    const asset =
+      result.assets[0];
+
 
     setProductFile({
       uri: asset.uri,
       fileName: asset.name,
       mimeType:
         asset.mimeType ??
-        "application/octet-stream",
+        "application/pdf",
     });
   }
 
@@ -284,7 +482,12 @@ export default function UploadProductScreen({
     setErrorMessage("");
 
     const cleanTitle = title.trim();
-    const cleanSubject = subject.trim();
+    const cleanSubject =
+      (
+        subject === "Lainnya"
+          ? customSubject
+          : subject
+      ).trim();
     const cleanDescription =
       description.trim();
 
@@ -796,33 +999,87 @@ export default function UploadProductScreen({
               Jenis Produk
             </Text>
 
-            <View style={styles.pills}>
-              {PRODUCT_TYPES.map(
-                (item) => (
-                  <Pressable
-                    key={item}
-                    onPress={() =>
-                      setProductType(item)
-                    }
-                    style={[
-                      styles.pill,
-                      productType === item &&
-                        styles.pillActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pillText,
-                        productType === item &&
-                          styles.pillTextActive,
-                      ]}
-                    >
-                      {item}
-                    </Text>
-                  </Pressable>
-                )
-              )}
-            </View>
+            <Pressable
+              style={
+                styles.fileTypeSelector
+              }
+              onPress={() => {
+                setShowProductTypeMenu(
+                  value => !value
+                );
+
+                setShowSubjectMenu(false);
+                setShowClassLevelMenu(false);
+                setShowProductFileKindMenu(false);
+              }}
+            >
+              <Text
+                style={
+                  styles.fileTypeValue
+                }
+              >
+                {productType}
+              </Text>
+
+              {showProductTypeMenu ? (
+              <ChevronUp
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            ) : (
+              <ChevronDown
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            )}
+            </Pressable>
+
+            {showProductTypeMenu ? (
+              <View
+                style={
+                  styles.fileTypeMenu
+                }
+              >
+                {PRODUCT_TYPES.map(
+                  (item, index) => (
+                    <View key={item}>
+                      {index > 0 ? (
+                        <View
+                          style={
+                            styles.dropdownDivider
+                          }
+                        />
+                      ) : null}
+
+                      <Pressable
+                        style={
+                          styles.dropdownOption
+                        }
+                        onPress={() => {
+                          setProductType(
+                            item
+                          );
+
+                          setShowProductTypeMenu(
+                            false
+                          );
+                        }}
+                      >
+                        <Text
+                          style={
+                            styles.dropdownOptionText
+                          }
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )
+                )}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -830,14 +1087,112 @@ export default function UploadProductScreen({
               Mata Pelajaran
             </Text>
 
-            <TextInput
-              value={subject}
-              onChangeText={setSubject}
-              style={styles.input}
-              placeholder="Pendidikan Agama Islam"
-              placeholderTextColor="#94A3B8"
-              maxLength={120}
-            />
+            <Pressable
+              style={
+                styles.fileTypeSelector
+              }
+              onPress={() => {
+                setShowSubjectMenu(
+                  value => !value
+                );
+
+                setShowProductTypeMenu(false);
+                setShowClassLevelMenu(false);
+                setShowProductFileKindMenu(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.fileTypeValue,
+
+                  !subject &&
+                    styles.fileTypePlaceholder,
+                ]}
+                numberOfLines={1}
+              >
+                {subject ||
+                  "Pilih mata pelajaran"}
+              </Text>
+
+              {showSubjectMenu ? (
+              <ChevronUp
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            ) : (
+              <ChevronDown
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            )}
+            </Pressable>
+
+            {showSubjectMenu ? (
+              <View
+                style={
+                  styles.fileTypeMenu
+                }
+              >
+                {SUBJECTS.map(
+                  (item, index) => (
+                    <View key={item}>
+                      {index > 0 ? (
+                        <View
+                          style={
+                            styles.dropdownDivider
+                          }
+                        />
+                      ) : null}
+
+                      <Pressable
+                        style={
+                          styles.dropdownOption
+                        }
+                        onPress={() => {
+                          setSubject(item);
+
+                          if (
+                            item !== "Lainnya"
+                          ) {
+                            setCustomSubject("");
+                          }
+
+                          setShowSubjectMenu(
+                            false
+                          );
+                        }}
+                      >
+                        <Text
+                          style={
+                            styles.dropdownOptionText
+                          }
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )
+                )}
+              </View>
+            ) : null}
+
+            {subject === "Lainnya" ? (
+              <TextInput
+                value={customSubject}
+                onChangeText={
+                  setCustomSubject
+                }
+                style={[
+                  styles.input,
+                  styles.customSubjectInput,
+                ]}
+                placeholder="Contoh: Geografi, Kimia, Fisika"
+                placeholderTextColor="#94A3B8"
+                maxLength={120}
+              />
+            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -845,33 +1200,85 @@ export default function UploadProductScreen({
               Kelas
             </Text>
 
-            <View style={styles.pills}>
-              {CLASS_LEVELS.map(
-                (item) => (
-                  <Pressable
-                    key={item}
-                    onPress={() =>
-                      setClassLevel(item)
-                    }
-                    style={[
-                      styles.pill,
-                      classLevel === item &&
-                        styles.pillActive,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.pillText,
-                        classLevel === item &&
-                          styles.pillTextActive,
-                      ]}
-                    >
-                      {item}
-                    </Text>
-                  </Pressable>
-                )
-              )}
-            </View>
+            <Pressable
+              style={
+                styles.fileTypeSelector
+              }
+              onPress={() => {
+                setShowClassLevelMenu(
+                  value => !value
+                );
+
+                setShowProductTypeMenu(false);
+                setShowSubjectMenu(false);
+                setShowProductFileKindMenu(false);
+              }}
+            >
+              <Text
+                style={
+                  styles.fileTypeValue
+                }
+              >
+                {classLevel}
+              </Text>
+
+              {showClassLevelMenu ? (
+              <ChevronUp
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            ) : (
+              <ChevronDown
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            )}
+            </Pressable>
+
+            {showClassLevelMenu ? (
+              <View
+                style={
+                  styles.fileTypeMenu
+                }
+              >
+                {CLASS_LEVELS.map(
+                  (item, index) => (
+                    <View key={item}>
+                      {index > 0 ? (
+                        <View
+                          style={
+                            styles.dropdownDivider
+                          }
+                        />
+                      ) : null}
+
+                      <Pressable
+                        style={
+                          styles.dropdownOption
+                        }
+                        onPress={() => {
+                          setClassLevel(item);
+
+                          setShowClassLevelMenu(
+                            false
+                          );
+                        }}
+                      >
+                        <Text
+                          style={
+                            styles.dropdownOptionText
+                          }
+                        >
+                          {item}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  )
+                )}
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -879,49 +1286,101 @@ export default function UploadProductScreen({
               Harga
             </Text>
 
-            <View style={styles.pills}>
-              <Pressable
-                onPress={() =>
-                  setPricingType("free")
-                }
-                style={[
-                  styles.pill,
-                  pricingType === "free" &&
-                    styles.pillActive,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.pillText,
-                    pricingType === "free" &&
-                      styles.pillTextActive,
-                  ]}
-                >
-                  Gratis
-                </Text>
-              </Pressable>
+            <Pressable
+              style={
+                styles.fileTypeSelector
+              }
+              onPress={() => {
+                setShowPricingTypeMenu(
+                  value => !value
+                );
 
-              <Pressable
-                onPress={() =>
-                  setPricingType("paid")
+                setShowProductTypeMenu(false);
+                setShowSubjectMenu(false);
+                setShowClassLevelMenu(false);
+                setShowProductFileKindMenu(false);
+              }}
+            >
+              <Text
+                style={
+                  styles.fileTypeValue
                 }
-                style={[
-                  styles.pill,
-                  pricingType === "paid" &&
-                    styles.pillActive,
-                ]}
               >
-                <Text
-                  style={[
-                    styles.pillText,
-                    pricingType === "paid" &&
-                      styles.pillTextActive,
-                  ]}
+                {pricingType === "free"
+                  ? "Gratis"
+                  : "Berbayar"}
+              </Text>
+
+              {showPricingTypeMenu ? (
+              <ChevronUp
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            ) : (
+              <ChevronDown
+                size={18}
+                strokeWidth={1.8}
+                color="#64748B"
+              />
+            )}
+            </Pressable>
+
+            {showPricingTypeMenu ? (
+              <View
+                style={
+                  styles.fileTypeMenu
+                }
+              >
+                <Pressable
+                  style={
+                    styles.dropdownOption
+                  }
+                  onPress={() => {
+                    setPricingType("free");
+                    setPrice("");
+                    setShowPricingTypeMenu(
+                      false
+                    );
+                  }}
                 >
-                  Berbayar
-                </Text>
-              </Pressable>
-            </View>
+                  <Text
+                    style={
+                      styles.dropdownOptionText
+                    }
+                  >
+                    Gratis
+                  </Text>
+                </Pressable>
+
+                <View
+                  style={
+                    styles.dropdownDivider
+                  }
+                />
+
+                <Pressable
+                  style={
+                    styles.dropdownOption
+                  }
+                  onPress={() => {
+                    setPricingType("paid");
+
+                    setShowPricingTypeMenu(
+                      false
+                    );
+                  }}
+                >
+                  <Text
+                    style={
+                      styles.dropdownOptionText
+                    }
+                  >
+                    Berbayar
+                  </Text>
+                </Pressable>
+              </View>
+            ) : null}
 
             {pricingType === "paid" ? (
               <TextInput
@@ -930,6 +1389,7 @@ export default function UploadProductScreen({
                 style={[
                   styles.input,
                   styles.priceInput,
+                  styles.compactPriceInput,
                 ]}
                 placeholder="Contoh: 15000"
                 placeholderTextColor="#94A3B8"
@@ -944,36 +1404,243 @@ export default function UploadProductScreen({
             </Text>
 
             <Pressable
-              style={styles.filePicker}
+              style={
+                styles.thumbnailPickerCard
+              }
               onPress={chooseThumbnail}
             >
-              <View style={styles.fileIcon}>
-                <ImageIcon
-                  size={20}
-                  color="#2563EB"
-                />
+              <View
+                style={
+                  styles.thumbnailPreview
+                }
+              >
+                {thumbnail ? (
+                  <Image
+                    source={{
+                      uri: thumbnail.uri,
+                    }}
+                    style={
+                      styles.thumbnailPreviewImage
+                    }
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View
+                    style={
+                      styles.thumbnailPlaceholder
+                    }
+                  >
+                    <ImageIcon
+                      size={24}
+                      color="#64748B"
+                      strokeWidth={1.6}
+                    />
+
+                    <Text
+                      style={
+                        styles.thumbnailRatio
+                      }
+                    >
+                      4:5
+                    </Text>
+                  </View>
+                )}
               </View>
 
-              <View style={styles.fileInfo}>
-                <Text style={styles.fileTitle}>
+              <View
+                style={
+                  styles.thumbnailPickerInfo
+                }
+              >
+                <Text
+                  style={
+                    styles.thumbnailPickerTitle
+                  }
+                >
                   {thumbnail
-                    ? "Thumbnail baru dipilih"
+                    ? "Thumbnail siap"
                     : editProductId
-                      ? "Thumbnail saat ini"
+                      ? "Ganti thumbnail"
                       : "Pilih thumbnail"}
                 </Text>
 
                 <Text
-                  style={styles.fileName}
-                  numberOfLines={1}
+                  style={
+                    styles.thumbnailSizeText
+                  }
                 >
-                  {thumbnail?.fileName ??
-                    (editProductId
-                      ? "Tetap gunakan thumbnail lama"
-                      : "PNG, JPG atau WEBP")}
+                  Rasio 4:5
+                </Text>
+
+                <Text
+                  style={
+                    styles.thumbnailSizeText
+                  }
+                >
+                  1080 × 1350 px
+                </Text>
+
+                <Text
+                  style={
+                    styles.thumbnailHint
+                  }
+                >
+                  Tekan untuk memilih dan mengatur posisi gambar
                 </Text>
               </View>
             </Pressable>
+          </View>
+
+          <View style={styles.field}>
+            <Text style={styles.label}>
+              Jenis File
+            </Text>
+
+            <Pressable
+              style={
+                styles.fileTypeSelector
+              }
+              onPress={() => {
+                setShowProductFileKindMenu(
+                  value => !value
+                );
+
+                setShowProductTypeMenu(false);
+                setShowSubjectMenu(false);
+                setShowClassLevelMenu(false);
+                setShowPricingTypeMenu(false);
+              }}
+            >
+              <Text
+                style={[
+                  styles.fileTypeValue,
+                  !productFileKind &&
+                    styles.fileTypePlaceholder,
+                ]}
+              >
+                {productFileKind === "pdf"
+                  ? "PDF"
+                  : productFileKind === "image"
+                    ? "Gambar"
+                    : "Pilih jenis file"}
+              </Text>
+
+              {showProductFileKindMenu ? (
+                <ChevronUp
+                  size={18}
+                  strokeWidth={1.8}
+                  color="#64748B"
+                />
+              ) : (
+                <ChevronDown
+                  size={18}
+                  strokeWidth={1.8}
+                  color="#64748B"
+                />
+              )}
+            </Pressable>
+
+            {showProductFileKindMenu ? (
+              <View
+                style={
+                  styles.fileTypeMenu
+                }
+              >
+                <Pressable
+                  style={
+                    styles.fileTypeOption
+                  }
+                  onPress={() =>
+                    selectProductFileKind(
+                      "pdf"
+                    )
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileTypeOptionIcon
+                    }
+                  >
+                    <FileText
+                      size={19}
+                      color="#2563EB"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileTypeOptionInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTypeOptionTitle
+                      }
+                    >
+                      PDF
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileTypeOptionSub
+                      }
+                    >
+                      Dokumen PDF
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <View
+                  style={
+                    styles.fileTypeDivider
+                  }
+                />
+
+                <Pressable
+                  style={
+                    styles.fileTypeOption
+                  }
+                  onPress={() =>
+                    selectProductFileKind(
+                      "image"
+                    )
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileTypeOptionIcon
+                    }
+                  >
+                    <ImageIcon
+                      size={19}
+                      color="#2563EB"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileTypeOptionInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTypeOptionTitle
+                      }
+                    >
+                      Gambar
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileTypeOptionSub
+                      }
+                    >
+                      JPG, PNG atau WEBP
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -982,14 +1649,29 @@ export default function UploadProductScreen({
             </Text>
 
             <Pressable
-              style={styles.filePicker}
-              onPress={chooseProductFile}
+              style={[
+                styles.filePicker,
+
+                !productFileKind &&
+                  styles.filePickerDisabled,
+              ]}
+              onPress={
+                chooseProductFile
+              }
             >
               <View style={styles.fileIcon}>
-                <FileText
-                  size={20}
-                  color="#2563EB"
-                />
+                {productFileKind ===
+                "image" ? (
+                  <ImageIcon
+                    size={20}
+                    color="#2563EB"
+                  />
+                ) : (
+                  <FileText
+                    size={20}
+                    color="#2563EB"
+                  />
+                )}
               </View>
 
               <View style={styles.fileInfo}>
@@ -998,7 +1680,11 @@ export default function UploadProductScreen({
                     ? "File baru dipilih"
                     : editProductId
                       ? "File produk saat ini"
-                      : "Pilih file produk"}
+                      : productFileKind === "pdf"
+                        ? "Pilih PDF"
+                        : productFileKind === "image"
+                          ? "Pilih gambar"
+                          : "Pilih jenis file dahulu"}
                 </Text>
 
                 <Text
@@ -1008,7 +1694,11 @@ export default function UploadProductScreen({
                   {productFile?.fileName ??
                     (editProductId
                       ? "Tetap gunakan file lama"
-                      : "PDF, PPT, Word, Excel atau ZIP")}
+                      : productFileKind === "pdf"
+                        ? "PDF saja"
+                        : productFileKind === "image"
+                          ? "JPG, PNG atau WEBP"
+                          : "PDF atau Gambar")}
                 </Text>
               </View>
             </Pressable>
@@ -1133,17 +1823,17 @@ const styles = StyleSheet.create({
   content: {
     padding: 16,
     paddingBottom: 36,
-    gap: 20,
+    gap: 7,
   },
 
   field: {
-    gap: 8,
+    gap: 3,
   },
 
   label: {
     fontFamily:
       "PlusJakartaSans_600SemiBold",
-    fontSize: 10.5,
+    fontSize: 12,
     color: "#334155",
   },
 
@@ -1156,7 +1846,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFFFFF",
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 11,
+    fontSize: 12,
     color: "#0F172A",
   },
 
@@ -1205,8 +1895,77 @@ const styles = StyleSheet.create({
     color: "#2563EB",
   },
 
+  thumbnailPickerCard: {
+    minHeight: 126,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+
+  thumbnailPreview: {
+    width: 88,
+    height: 110,
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: "#F1F5F9",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+
+  thumbnailPreviewImage: {
+    width: "100%",
+    height: "100%",
+  },
+
+  thumbnailPlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+  },
+
+  thumbnailRatio: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 12,
+    color: "#64748B",
+  },
+
+  thumbnailPickerInfo: {
+    flex: 1,
+  },
+
+  thumbnailPickerTitle: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 12,
+    color: "#0F172A",
+  },
+
+  thumbnailSizeText: {
+    marginTop: 2,
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 12,
+    color: "#475569",
+  },
+
+  thumbnailHint: {
+    marginTop: 5,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#94A3B8",
+  },
+
   filePicker: {
-    minHeight: 68,
+    minHeight: 54,
     padding: 12,
     borderWidth: 1,
     borderColor: "#E2E8F0",
@@ -1233,15 +1992,129 @@ const styles = StyleSheet.create({
   fileTitle: {
     fontFamily:
       "PlusJakartaSans_600SemiBold",
-    fontSize: 10.5,
+    fontSize: 12,
     color: "#0F172A",
+  },
+
+  dropdownOption: {
+    minHeight: 40,
+    paddingHorizontal: 14,
+    justifyContent: "center",
+  },
+
+  dropdownOptionText: {
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 12,
+    color: "#0F172A",
+  },
+
+  dropdownDivider: {
+    height:
+      StyleSheet.hairlineWidth,
+    backgroundColor: "#E2E8F0",
+    marginHorizontal: 14,
+  },
+
+  customSubjectInput: {
+    marginTop: 3,
+  },
+
+  compactPriceInput: {
+    marginTop: 3,
+  },
+
+  fileTypeSelector: {
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: "#CBD5E1",
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  fileTypeValue: {
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 12,
+    color: "#0F172A",
+  },
+
+  fileTypePlaceholder: {
+    color: "#94A3B8",
+  },
+
+  fileTypeChevron: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 10,
+    color: "#64748B",
+  },
+
+  fileTypeMenu: {
+    marginTop: 3,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+
+  fileTypeOption: {
+    minHeight: 54,
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  fileTypeOptionIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  fileTypeOptionInfo: {
+    flex: 1,
+    marginLeft: 10,
+  },
+
+  fileTypeOptionTitle: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 12,
+    color: "#0F172A",
+  },
+
+  fileTypeOptionSub: {
+    marginTop: 2,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 12,
+    color: "#94A3B8",
+  },
+
+  fileTypeDivider: {
+    height:
+      StyleSheet.hairlineWidth,
+    backgroundColor: "#E2E8F0",
+    marginLeft: 56,
+  },
+
+  filePickerDisabled: {
+    opacity: 0.55,
   },
 
   fileName: {
     marginTop: 3,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 8.5,
+    fontSize: 12,
     color: "#94A3B8",
   },
 

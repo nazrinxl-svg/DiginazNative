@@ -3,9 +3,10 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   ScrollView,
-  Share,
+
   StatusBar,
   StyleSheet,
   Text,
@@ -14,9 +15,11 @@ import {
 import {
   ArrowLeft,
   BookOpen,
+  Bookmark,
+  Heart,
   MessageCircle,
   Pencil,
-  Share2,
+
   ShieldCheck,
   Trash2,
   Star,
@@ -65,6 +68,10 @@ type Props = {
   onOpenChat: (
     conversationId: string
   ) => void;
+
+  onOpenCreatorProfile: (
+    creatorUserId: string
+  ) => void;
 };
 
 export default function ProductDetailScreen({
@@ -73,6 +80,7 @@ export default function ProductDetailScreen({
   onEditProduct,
   onProductChanged,
   onOpenChat,
+  onOpenCreatorProfile,
 }: Props) {
   const [detail, setDetail] =
     useState<ProductDetailRow | null>(null);
@@ -94,6 +102,36 @@ export default function ProductDetailScreen({
 
   const [deleteLoading, setDeleteLoading] =
     useState(false);
+
+  const [
+    deleteConfirmVisible,
+    setDeleteConfirmVisible,
+  ] = useState(false);
+
+  const [
+    isLoved,
+    setIsLoved,
+  ] = useState(false);
+
+  const [
+    loveCount,
+    setLoveCount,
+  ] = useState(0);
+
+  const [
+    loveLoading,
+    setLoveLoading,
+  ] = useState(false);
+
+  const [
+    isSaved,
+    setIsSaved,
+  ] = useState(false);
+
+  const [
+    saveLoading,
+    setSaveLoading,
+  ] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -155,6 +193,322 @@ export default function ProductDetailScreen({
 
   const isOwner =
     currentUserId === product.creatorUserId;
+
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProductActions() {
+      if (!currentUserId) {
+        if (active) {
+          setIsLoved(false);
+          setLoveCount(0);
+          setIsSaved(false);
+        }
+
+        return;
+      }
+
+      try {
+        const [
+          loveCountResult,
+          ownLoveResult,
+          ownSaveResult,
+        ] =
+          await Promise.all([
+            supabase
+              .from(
+                "store_product_likes"
+              )
+              .select(
+                "product_id",
+                {
+                  count: "exact",
+                  head: true,
+                }
+              )
+              .eq(
+                "product_id",
+                product.id
+              ),
+
+            supabase
+              .from(
+                "store_product_likes"
+              )
+              .select(
+                "product_id"
+              )
+              .eq(
+                "user_id",
+                currentUserId
+              )
+              .eq(
+                "product_id",
+                product.id
+              )
+              .maybeSingle(),
+
+            supabase
+              .from(
+                "store_product_saves"
+              )
+              .select(
+                "product_id"
+              )
+              .eq(
+                "user_id",
+                currentUserId
+              )
+              .eq(
+                "product_id",
+                product.id
+              )
+              .maybeSingle(),
+          ]);
+
+        if (
+          loveCountResult.error
+        ) {
+          throw loveCountResult.error;
+        }
+
+        if (
+          ownLoveResult.error
+        ) {
+          throw ownLoveResult.error;
+        }
+
+        if (
+          ownSaveResult.error
+        ) {
+          throw ownSaveResult.error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setLoveCount(
+          loveCountResult.count ??
+            0
+        );
+
+        setIsLoved(
+          Boolean(
+            ownLoveResult.data
+          )
+        );
+
+        setIsSaved(
+          Boolean(
+            ownSaveResult.data
+          )
+        );
+
+      } catch (error) {
+        console.warn(
+          "Status Love/Save gagal dimuat:",
+          error
+        );
+      }
+    }
+
+    void loadProductActions();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    currentUserId,
+    product.id,
+  ]);
+
+
+  async function handleLoveToggle() {
+    if (
+      !currentUserId ||
+      isOwner ||
+      loveLoading
+    ) {
+      return;
+    }
+
+    const previousLoved =
+      isLoved;
+
+    const previousCount =
+      loveCount;
+
+    const nextLoved =
+      !previousLoved;
+
+    setLoveLoading(true);
+    setIsLoved(nextLoved);
+
+    setLoveCount(
+      Math.max(
+        0,
+        previousCount +
+          (
+            nextLoved
+              ? 1
+              : -1
+          )
+      )
+    );
+
+    try {
+      if (nextLoved) {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_likes"
+            )
+            .insert({
+              user_id:
+                currentUserId,
+
+              product_id:
+                product.id,
+            });
+
+        if (error) {
+          throw error;
+        }
+
+      } else {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_likes"
+            )
+            .delete()
+            .eq(
+              "user_id",
+              currentUserId
+            )
+            .eq(
+              "product_id",
+              product.id
+            );
+
+        if (error) {
+          throw error;
+        }
+      }
+
+    } catch (error) {
+      setIsLoved(
+        previousLoved
+      );
+
+      setLoveCount(
+        previousCount
+      );
+
+      console.error(
+        "Love produk gagal:",
+        error
+      );
+
+      Alert.alert(
+        "Belum tersimpan",
+        "Love produk belum dapat diperbarui."
+      );
+
+    } finally {
+      setLoveLoading(false);
+    }
+  }
+
+
+  async function handleSaveToggle() {
+    if (
+      !currentUserId ||
+      isOwner ||
+      saveLoading
+    ) {
+      return;
+    }
+
+    const previousSaved =
+      isSaved;
+
+    const nextSaved =
+      !previousSaved;
+
+    setSaveLoading(true);
+    setIsSaved(nextSaved);
+
+    try {
+      if (nextSaved) {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_saves"
+            )
+            .insert({
+              user_id:
+                currentUserId,
+
+              product_id:
+                product.id,
+            });
+
+        if (error) {
+          throw error;
+        }
+
+      } else {
+        const {
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_saves"
+            )
+            .delete()
+            .eq(
+              "user_id",
+              currentUserId
+            )
+            .eq(
+              "product_id",
+              product.id
+            );
+
+        if (error) {
+          throw error;
+        }
+      }
+
+    } catch (error) {
+      setIsSaved(
+        previousSaved
+      );
+
+      console.error(
+        "Save produk gagal:",
+        error
+      );
+
+      Alert.alert(
+        "Belum tersimpan",
+        "Produk belum dapat disimpan."
+      );
+
+    } finally {
+      setSaveLoading(false);
+    }
+  }
+
 
   async function handleContactCreator() {
     if (
@@ -405,42 +759,17 @@ export default function ProductDetailScreen({
   }
 
   function confirmArchiveProduct() {
-    Alert.alert(
-      "Hapus produk dari Store?",
-      "Produk akan hilang dari katalog. Riwayat chat dan ulasan tetap disimpan agar data tidak rusak.",
-      [
-        {
-          text: "Batal",
-          style: "cancel",
-        },
-        {
-          text: "Hapus dari Store",
-          style: "destructive",
-          onPress: () => {
-            void archiveProduct();
-          },
-        },
-      ]
-    );
+    if (
+      !isOwner ||
+      deleteLoading
+    ) {
+      return;
+    }
+
+    setDeleteConfirmVisible(true);
   }
 
-  async function handleShare() {
-    try {
-      await Share.share({
-        message:
-          `${product.title}\n` +
-          `${product.subject} · ${product.level}\n` +
-          `Oleh ${product.author}\n` +
-          `${product.price}\n\n` +
-          "Tersedia di Diginaz Store.",
-      });
-    } catch (error) {
-      console.warn(
-        "Bagikan produk gagal:",
-        error
-      );
-    }
-  }
+
 
   return (
     <SafeAreaView
@@ -467,15 +796,56 @@ export default function ProductDetailScreen({
           Detail Produk
         </Text>
 
-        <Pressable
-          style={styles.headerButton}
-          onPress={handleShare}
-        >
-          <Share2
-            size={19}
-            color="#0F172A"
-          />
-        </Pressable>
+        {isOwner ? (
+          <View
+            style={
+              styles.headerOwnerActions
+            }
+          >
+            <Pressable
+              style={
+                styles.headerOwnerIconButton
+              }
+              onPress={onEditProduct}
+              disabled={deleteLoading}
+              hitSlop={6}
+              accessibilityLabel="Edit produk"
+            >
+              <Pencil
+                size={18}
+                color="#2563EB"
+                strokeWidth={1.8}
+              />
+            </Pressable>
+
+            <Pressable
+              style={
+                styles.headerOwnerIconButton
+              }
+              onPress={
+                confirmArchiveProduct
+              }
+              disabled={deleteLoading}
+              hitSlop={6}
+              accessibilityLabel="Hapus produk"
+            >
+              {deleteLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#DC2626"
+                />
+              ) : (
+                <Trash2
+                  size={18}
+                  color="#DC2626"
+                  strokeWidth={1.8}
+                />
+              )}
+            </Pressable>
+          </View>
+        ) : null}
+
+
       </View>
 
       {loading ? (
@@ -545,9 +915,20 @@ export default function ProductDetailScreen({
               {product.title}
             </Text>
 
-            <Text style={styles.creator}>
-              Oleh {product.author}
-            </Text>
+            <Pressable
+              disabled={isOwner}
+              onPress={() =>
+                onOpenCreatorProfile(
+                  product.creatorUserId
+                )
+              }
+            >
+              <Text
+                style={styles.creator}
+              >
+                Oleh {product.author}
+              </Text>
+            </Pressable>
 
             <View style={styles.summaryRow}>
               <View style={styles.rating}>
@@ -578,6 +959,120 @@ export default function ProductDetailScreen({
               </Text>
             </View>
           </View>
+
+
+          <View
+            style={[
+              styles.productActions,
+              isOwner &&
+                styles.ownerProductActionsHidden,
+            ]}
+          >
+            {!isOwner ? (
+              <>
+                <Pressable
+                  style={
+                    styles.productAction
+                  }
+                  onPress={() =>
+                    void handleLoveToggle()
+                  }
+                  disabled={
+                    loveLoading
+                  }
+                  accessibilityLabel="Love produk"
+                >
+                  {loveLoading ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#E11D48"
+                    />
+                  ) : (
+                    <Heart
+                      size={21}
+                      color={
+                        isLoved
+                          ? "#E11D48"
+                          : "#64748B"
+                      }
+                      fill={
+                        isLoved
+                          ? "#E11D48"
+                          : "none"
+                      }
+                      strokeWidth={1.8}
+                    />
+                  )}
+
+                  <Text
+                    style={[
+                      styles.productActionText,
+
+                      isLoved &&
+                        styles.loveActionText,
+                    ]}
+                  >
+                    Love{
+                      loveCount > 0
+                        ? ` ${loveCount}`
+                        : ""
+                    }
+                  </Text>
+                </Pressable>
+
+
+                <Pressable
+                  style={
+                    styles.productAction
+                  }
+                  onPress={() =>
+                    void handleSaveToggle()
+                  }
+                  disabled={
+                    saveLoading
+                  }
+                  accessibilityLabel="Save produk"
+                >
+                  {saveLoading ? (
+                    <ActivityIndicator
+                      size="small"
+                      color="#2563EB"
+                    />
+                  ) : (
+                    <Bookmark
+                      size={21}
+                      color={
+                        isSaved
+                          ? "#2563EB"
+                          : "#64748B"
+                      }
+                      fill={
+                        isSaved
+                          ? "#2563EB"
+                          : "none"
+                      }
+                      strokeWidth={1.8}
+                    />
+                  )}
+
+                  <Text
+                    style={[
+                      styles.productActionText,
+
+                      isSaved &&
+                        styles.saveActionText,
+                    ]}
+                  >
+                    Save
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
+
+
+
+          </View>
+
 
           {!isOwner ? (
             <>
@@ -658,57 +1153,6 @@ export default function ProductDetailScreen({
             </>
           ) : null}
 
-          {isOwner ? (
-            <View style={styles.ownerActions}>
-              <Pressable
-                style={styles.editProductButton}
-                onPress={onEditProduct}
-                disabled={deleteLoading}
-              >
-                <Pencil
-                  size={17}
-                  color="#2563EB"
-                />
-
-                <Text
-                  style={
-                    styles.editProductButtonText
-                  }
-                >
-                  Edit Produk
-                </Text>
-              </Pressable>
-
-              <Pressable
-                style={styles.removeProductButton}
-                onPress={confirmArchiveProduct}
-                disabled={deleteLoading}
-              >
-                {deleteLoading ? (
-                  <ActivityIndicator
-                    size="small"
-                    color="#DC2626"
-                  />
-                ) : (
-                  <Trash2
-                    size={17}
-                    color="#DC2626"
-                  />
-                )}
-
-                <Text
-                  style={
-                    styles.removeProductButtonText
-                  }
-                >
-                  {deleteLoading
-                    ? "Menghapus..."
-                    : "Hapus dari Store"}
-                </Text>
-              </Pressable>
-            </View>
-          ) : null}
-
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
               Deskripsi
@@ -758,7 +1202,15 @@ export default function ProductDetailScreen({
                 </Text>
               </View>
 
-              <View style={styles.infoRow}>
+              <Pressable
+                style={styles.infoRow}
+                disabled={isOwner}
+                onPress={() =>
+                  onOpenCreatorProfile(
+                    product.creatorUserId
+                  )
+                }
+              >
                 <Text style={styles.infoLabel}>
                   Kreator
                 </Text>
@@ -766,7 +1218,7 @@ export default function ProductDetailScreen({
                 <Text style={styles.infoValue}>
                   {product.author}
                 </Text>
-              </View>
+              </Pressable>
             </View>
           </View>
 
@@ -779,6 +1231,119 @@ export default function ProductDetailScreen({
 
         </ScrollView>
       )}
+
+      <Modal
+        visible={deleteConfirmVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => {
+          if (!deleteLoading) {
+            setDeleteConfirmVisible(false);
+          }
+        }}
+      >
+        <View style={styles.deleteModalRoot}>
+          <Pressable
+            style={styles.deleteModalBackdrop}
+            disabled={deleteLoading}
+            onPress={() =>
+              setDeleteConfirmVisible(false)
+            }
+          />
+
+          <View style={styles.deleteModalCard}>
+            <View style={styles.deleteModalIcon}>
+              <Trash2
+                size={23}
+                color="#DC2626"
+                strokeWidth={1.8}
+              />
+            </View>
+
+            <Text style={styles.deleteModalTitle}>
+              Hapus produk?
+            </Text>
+
+            <Text
+              style={styles.deleteModalDescription}
+            >
+              Produk akan dihapus dari Store dan
+              tidak lagi tampil di katalog. Riwayat
+              chat dan ulasan tetap disimpan.
+            </Text>
+
+            <View
+              style={styles.deleteModalProduct}
+            >
+              <Text
+                style={
+                  styles.deleteModalProductLabel
+                }
+              >
+                PRODUK
+              </Text>
+
+              <Text
+                style={
+                  styles.deleteModalProductTitle
+                }
+                numberOfLines={2}
+              >
+                {product.title}
+              </Text>
+            </View>
+
+            <View
+              style={styles.deleteModalActions}
+            >
+              <Pressable
+                style={
+                  styles.deleteModalCancelButton
+                }
+                disabled={deleteLoading}
+                onPress={() =>
+                  setDeleteConfirmVisible(false)
+                }
+              >
+                <Text
+                  style={
+                    styles.deleteModalCancelText
+                  }
+                >
+                  Batal
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={
+                  styles.deleteModalDeleteButton
+                }
+                disabled={deleteLoading}
+                onPress={() => {
+                  setDeleteConfirmVisible(false);
+                  void archiveProduct();
+                }}
+              >
+                <Trash2
+                  size={16}
+                  color="#FFFFFF"
+                  strokeWidth={1.9}
+                />
+
+                <Text
+                  style={
+                    styles.deleteModalDeleteText
+                  }
+                >
+                  Hapus Produk
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
@@ -813,7 +1378,29 @@ const styles = StyleSheet.create({
     fontFamily:
       "PlusJakartaSans_700Bold",
     fontSize: 13,
-    color: "#0F172A",
+    color: "#0F172A",    position: "absolute",
+    left: 84,
+    right: 84,
+    textAlign: "center",
+  },
+
+  headerOwnerActions: {
+    marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  headerOwnerIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  ownerProductActionsHidden: {
+    display: "none",
   },
 
   centerState: {
@@ -946,6 +1533,45 @@ const styles = StyleSheet.create({
     color: "#16A34A",
   },
 
+  productActions: {
+    marginHorizontal: 16,
+    marginTop: 14,
+    minHeight: 54,
+    borderTopWidth:
+      StyleSheet.hairlineWidth,
+    borderBottomWidth:
+      StyleSheet.hairlineWidth,
+    borderColor: "#E2E8F0",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+  },
+
+  productAction: {
+    minWidth: 76,
+    minHeight: 48,
+    paddingHorizontal: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+
+  productActionText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11.5,
+    color: "#64748B",
+  },
+
+  loveActionText: {
+    color: "#E11D48",
+  },
+
+  saveActionText: {
+    color: "#2563EB",
+  },
+
   contactButton: {
     minHeight: 44,
     marginHorizontal: 16,
@@ -1022,8 +1648,8 @@ const styles = StyleSheet.create({
 
   section: {
     marginHorizontal: 16,
-    marginTop: 18,
-    paddingTop: 14,
+    marginTop: 14,
+    paddingTop: 11,
     borderTopWidth: 1,
     borderTopColor: "#E2E8F0",
   },
@@ -1036,17 +1662,17 @@ const styles = StyleSheet.create({
   },
 
   description: {
-    marginTop: 7,
+    marginTop: 5,
     fontFamily:
       "PlusJakartaSans_400Regular",
     fontSize: 12,
-    lineHeight: 19,
+    lineHeight: 17,
     color: "#475569",
   },
 
   infoRows: {
-    marginTop: 8,
-    gap: 8,
+    marginTop: 6,
+    gap: 5,
   },
 
   infoRow: {
@@ -1113,5 +1739,136 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     color: "#DC2626",
   },
+
+  deleteModalRoot: {
+    flex: 1,
+    paddingHorizontal: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deleteModalBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor:
+      "rgba(15, 23, 42, 0.48)",
+  },
+
+  deleteModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 22,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+
+  deleteModalIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FEF2F2",
+  },
+
+  deleteModalTitle: {
+    marginTop: 14,
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 16,
+    color: "#0F172A",
+    textAlign: "center",
+  },
+
+  deleteModalDescription: {
+    marginTop: 7,
+    maxWidth: 290,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11.5,
+    lineHeight: 18,
+    color: "#64748B",
+    textAlign: "center",
+  },
+
+  deleteModalProduct: {
+    width: "100%",
+    marginTop: 16,
+    borderRadius: 12,
+    backgroundColor: "#F8FAFC",
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+  },
+
+  deleteModalProductLabel: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 8.5,
+    color: "#94A3B8",
+    letterSpacing: 0.6,
+  },
+
+  deleteModalProductTitle: {
+    marginTop: 3,
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11.5,
+    lineHeight: 17,
+    color: "#334155",
+  },
+
+  deleteModalActions: {
+    width: "100%",
+    marginTop: 18,
+    flexDirection: "row",
+    gap: 9,
+  },
+
+  deleteModalCancelButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  deleteModalCancelText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11,
+    color: "#475569",
+  },
+
+  deleteModalDeleteButton: {
+    flex: 1.25,
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: "#DC2626",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+  },
+
+  deleteModalDeleteText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11,
+    color: "#FFFFFF",
+  },
+
 
 });
