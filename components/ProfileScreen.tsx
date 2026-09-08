@@ -10,19 +10,27 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  Modal,
   Pressable,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from "react-native";
 
 import {
   ArrowLeft,
+  Camera,
+  ChevronRight,
   Grid3X3,
   LogOut,
+  MoreVertical,
   PackageOpen,
+  PencilLine,
+  Settings,
+  Shield,
 } from "lucide-react-native";
 
 import {
@@ -49,6 +57,8 @@ type ProfileRow = {
   class_level: string | null;
   subject_id: string | null;
   bio: string | null;
+  username: string | null;
+  avatar_url: string | null;
 };
 
 
@@ -175,6 +185,51 @@ export default function ProfileScreen({
   ] = useState("");
 
   const [
+    username,
+    setUsername,
+  ] = useState("");
+
+  const [
+    avatarUrl,
+    setAvatarUrl,
+  ] = useState("");
+
+  const [
+    showSettingsMenu,
+    setShowSettingsMenu,
+  ] = useState(false);
+
+  const [
+    showEditProfile,
+    setShowEditProfile,
+  ] = useState(false);
+
+  const [
+    editName,
+    setEditName,
+  ] = useState("");
+
+  const [
+    editUsername,
+    setEditUsername,
+  ] = useState("");
+
+  const [
+    editBio,
+    setEditBio,
+  ] = useState("");
+
+  const [
+    savingProfile,
+    setSavingProfile,
+  ] = useState(false);
+
+  const [
+    photoUploading,
+    setPhotoUploading,
+  ] = useState(false);
+
+  const [
     followerCount,
     setFollowerCount,
   ] = useState(0);
@@ -299,7 +354,7 @@ export default function ProfileScreen({
           await supabase
             .from("app_profiles")
             .select(
-              "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id,bio"
+              "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id,bio,username,avatar_url"
             )
             .eq(
               "auth_user_id",
@@ -328,7 +383,7 @@ export default function ProfileScreen({
                 "app_profiles"
               )
               .select(
-                "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id,bio"
+                "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id,bio,username,avatar_url"
               )
               .ilike(
                 "email",
@@ -376,6 +431,25 @@ export default function ProfileScreen({
         setBio(
           profileRow
             ?.bio
+            ?.trim() ??
+            ""
+        );
+
+        setUsername(
+          profileRow
+            ?.username
+            ?.trim() ??
+            getUsername(
+              fallbackEmail
+            ).replace(
+              /^@/,
+              ""
+            )
+        );
+
+        setAvatarUrl(
+          profileRow
+            ?.avatar_url
             ?.trim() ??
             ""
         );
@@ -546,6 +620,631 @@ export default function ProfileScreen({
     products,
   ]);
 
+  function openEditProfile() {
+    const fallbackUsername =
+      getUsername(
+        email
+      ).replace(
+        /^@/,
+        ""
+      );
+
+    setEditName(
+      name
+    );
+
+    setEditUsername(
+      username ||
+        fallbackUsername
+    );
+
+    setEditBio(
+      bio
+    );
+
+    setShowSettingsMenu(
+      false
+    );
+
+    setShowEditProfile(
+      true
+    );
+  }
+
+
+  function decodeBase64(
+    base64: string
+  ): ArrayBuffer {
+    const chars =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+    const clean =
+      base64.replace(
+        /[^A-Za-z0-9+/=]/g,
+        ""
+      );
+
+    const padding =
+      clean.endsWith("==")
+        ? 2
+        : clean.endsWith("=")
+          ? 1
+          : 0;
+
+    const byteLength =
+      Math.floor(
+        clean.length * 3 / 4
+      ) - padding;
+
+    const bytes =
+      new Uint8Array(
+        byteLength
+      );
+
+    let byteIndex =
+      0;
+
+    for (
+      let index = 0;
+      index < clean.length;
+      index += 4
+    ) {
+      const first =
+        chars.indexOf(
+          clean[index] ?? "A"
+        );
+
+      const second =
+        chars.indexOf(
+          clean[index + 1] ?? "A"
+        );
+
+      const thirdChar =
+        clean[index + 2] ?? "=";
+
+      const fourthChar =
+        clean[index + 3] ?? "=";
+
+      const third =
+        thirdChar === "="
+          ? 0
+          : chars.indexOf(
+              thirdChar
+            );
+
+      const fourth =
+        fourthChar === "="
+          ? 0
+          : chars.indexOf(
+              fourthChar
+            );
+
+      const chunk =
+        (first << 18) |
+        (second << 12) |
+        (third << 6) |
+        fourth;
+
+      if (
+        byteIndex <
+        byteLength
+      ) {
+        bytes[byteIndex] =
+          (chunk >> 16) &
+          255;
+
+        byteIndex += 1;
+      }
+
+      if (
+        byteIndex <
+        byteLength
+      ) {
+        bytes[byteIndex] =
+          (chunk >> 8) &
+          255;
+
+        byteIndex += 1;
+      }
+
+      if (
+        byteIndex <
+        byteLength
+      ) {
+        bytes[byteIndex] =
+          chunk & 255;
+
+        byteIndex += 1;
+      }
+    }
+
+    return bytes.buffer;
+  }
+
+
+  async function handleChangePhoto() {
+    if (
+      photoUploading ||
+      !currentUserId
+    ) {
+      return;
+    }
+
+    setPhotoUploading(
+      true
+    );
+
+    let uploadedPath =
+      "";
+
+    try {
+      const cropModule =
+        await import(
+          "react-native-image-crop-picker"
+        );
+
+      const ImageCropPicker =
+        cropModule.default;
+
+      const asset =
+        await ImageCropPicker.openPicker({
+          mediaType: "photo",
+          width: 1024,
+          height: 1024,
+          cropping: true,
+          cropperCircleOverlay: true,
+          freeStyleCropEnabled: false,
+          includeBase64: true,
+          compressImageQuality: 0.82,
+          cropperToolbarTitle:
+            "Sesuaikan Foto",
+          cropperChooseText:
+            "Gunakan",
+          cropperCancelText:
+            "Batal",
+        });
+
+
+      if (
+        !asset ||
+        !asset.data
+      ) {
+        throw new Error(
+          "Data foto tidak tersedia."
+        );
+      }
+
+
+      const mimeType =
+        (
+          asset.mime ??
+          ""
+        ).toLowerCase();
+
+      let extension =
+        "";
+
+      if (
+        mimeType ===
+          "image/jpeg" ||
+        mimeType ===
+          "image/jpg"
+      ) {
+        extension =
+          "jpg";
+      }
+      else if (
+        mimeType ===
+        "image/png"
+      ) {
+        extension =
+          "png";
+      }
+      else if (
+        mimeType ===
+        "image/webp"
+      ) {
+        extension =
+          "webp";
+      }
+      else {
+        Alert.alert(
+          "Format belum didukung",
+          "Gunakan foto JPG, PNG, atau WEBP."
+        );
+
+        return;
+      }
+
+
+      const arrayBuffer =
+        decodeBase64(
+          asset.data
+        );
+
+
+      if (
+        arrayBuffer.byteLength >
+        5 * 1024 * 1024
+      ) {
+        Alert.alert(
+          "Foto terlalu besar",
+          "Ukuran foto maksimal 5 MB."
+        );
+
+        return;
+      }
+
+
+      uploadedPath =
+        currentUserId +
+        "/" +
+        Date.now() +
+        "." +
+        extension;
+
+
+      const {
+        error: uploadError,
+      } =
+        await supabase
+          .storage
+          .from(
+            "profile-avatars"
+          )
+          .upload(
+            uploadedPath,
+            arrayBuffer,
+            {
+              contentType:
+                mimeType,
+              cacheControl:
+                "31536000",
+              upsert: false,
+            }
+          );
+
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+
+      const {
+        data: publicData,
+      } =
+        supabase
+          .storage
+          .from(
+            "profile-avatars"
+          )
+          .getPublicUrl(
+            uploadedPath
+          );
+
+
+      const publicUrl =
+        publicData.publicUrl;
+
+      if (!publicUrl) {
+        throw new Error(
+          "URL foto tidak tersedia."
+        );
+      }
+
+
+      const previousUrl =
+        avatarUrl;
+
+
+      const {
+        data: updatedProfile,
+        error: profileError,
+      } =
+        await supabase
+          .from(
+            "app_profiles"
+          )
+          .update({
+            avatar_url:
+              publicUrl,
+            updated_at:
+              new Date()
+                .toISOString(),
+          })
+          .eq(
+            "auth_user_id",
+            currentUserId
+          )
+          .select(
+            "avatar_url"
+          )
+          .maybeSingle();
+
+
+      if (
+        profileError ||
+        !updatedProfile
+      ) {
+        await supabase
+          .storage
+          .from(
+            "profile-avatars"
+          )
+          .remove([
+            uploadedPath,
+          ]);
+
+        uploadedPath =
+          "";
+
+        if (profileError) {
+          throw profileError;
+        }
+
+        throw new Error(
+          "Profil tidak ditemukan."
+        );
+      }
+
+
+      setAvatarUrl(
+        updatedProfile
+          .avatar_url ??
+          publicUrl
+      );
+
+
+      const marker =
+        "/storage/v1/object/public/profile-avatars/";
+
+      if (
+        previousUrl &&
+        previousUrl.includes(
+          marker
+        )
+      ) {
+        const encodedOldPath =
+          previousUrl
+            .split(
+              marker
+            )[1]
+            ?.split("?")[0];
+
+        if (encodedOldPath) {
+          const oldPath =
+            decodeURIComponent(
+              encodedOldPath
+            );
+
+          if (
+            oldPath &&
+            oldPath !==
+              uploadedPath
+          ) {
+            void supabase
+              .storage
+              .from(
+                "profile-avatars"
+              )
+              .remove([
+                oldPath,
+              ]);
+          }
+        }
+      }
+
+
+      uploadedPath =
+        "";
+
+    } catch (error) {
+      const cropError =
+        error as {
+          code?: string;
+          message?: string;
+        };
+
+      if (
+        cropError?.code ===
+          "E_PICKER_CANCELLED" ||
+        cropError?.code ===
+          "E_PICKER_CANCEL"
+      ) {
+        return;
+      }
+
+      console.error(
+        "Gagal mengganti foto profil:",
+        error
+      );
+
+
+      if (uploadedPath) {
+        try {
+          await supabase
+            .storage
+            .from(
+              "profile-avatars"
+            )
+            .remove([
+              uploadedPath,
+            ]);
+        }
+        catch {
+          // cleanup best effort
+        }
+      }
+
+
+      Alert.alert(
+        "Foto belum dapat diganti",
+        error instanceof Error
+          ? error.message
+          : "Terjadi kesalahan saat mengunggah foto."
+      );
+
+    } finally {
+      setPhotoUploading(
+        false
+      );
+    }
+  }
+
+
+  async function saveProfileChanges() {
+    if (
+      savingProfile ||
+      !currentUserId
+    ) {
+      return;
+    }
+
+    const cleanName =
+      editName.trim();
+
+    const cleanUsername =
+      editUsername
+        .trim()
+        .toLowerCase()
+        .replace(
+          /^@+/,
+          ""
+        );
+
+    const cleanBio =
+      editBio.trim();
+
+    if (
+      cleanName.length < 2
+    ) {
+      Alert.alert(
+        "Nama belum sesuai",
+        "Nama minimal 2 karakter."
+      );
+
+      return;
+    }
+
+    if (
+      !/^[a-z0-9._]{3,30}$/.test(
+        cleanUsername
+      )
+    ) {
+      Alert.alert(
+        "Username belum sesuai",
+        "Gunakan 3-30 karakter: huruf kecil, angka, titik, atau garis bawah."
+      );
+
+      return;
+    }
+
+    if (
+      cleanBio.length > 160
+    ) {
+      Alert.alert(
+        "Bio terlalu panjang",
+        "Bio maksimal 160 karakter."
+      );
+
+      return;
+    }
+
+    setSavingProfile(
+      true
+    );
+
+    try {
+      const {
+        data,
+        error,
+      } =
+        await supabase
+          .from(
+            "app_profiles"
+          )
+          .update({
+            full_name:
+              cleanName,
+            username:
+              cleanUsername,
+            bio:
+              cleanBio ||
+              null,
+            updated_at:
+              new Date()
+                .toISOString(),
+          })
+          .eq(
+            "auth_user_id",
+            currentUserId
+          )
+          .select(
+            "full_name,username,bio"
+          )
+          .maybeSingle();
+
+      if (error) {
+        if (
+          error.code ===
+          "23505"
+        ) {
+          Alert.alert(
+            "Username tidak tersedia",
+            "Username tersebut sudah digunakan pengguna lain."
+          );
+
+          return;
+        }
+
+        throw error;
+      }
+
+      if (!data) {
+        throw new Error(
+          "Profil tidak ditemukan."
+        );
+      }
+
+      setName(
+        data.full_name
+      );
+
+      setUsername(
+        data.username ??
+          cleanUsername
+      );
+
+      setBio(
+        data.bio ??
+          ""
+      );
+
+      setShowEditProfile(
+        false
+      );
+
+    } catch (error) {
+      console.error(
+        "Gagal menyimpan profil:",
+        error
+      );
+
+      Alert.alert(
+        "Belum dapat menyimpan",
+        error instanceof Error
+          ? error.message
+          : "Terjadi kesalahan saat menyimpan profil."
+      );
+
+    } finally {
+      setSavingProfile(
+        false
+      );
+    }
+  }
+
+
   async function handleLogout() {
     if (logoutLoading) {
       return;
@@ -650,30 +1349,540 @@ export default function ProfileScreen({
         </Text>
 
         <Pressable
-          onPress={
-            confirmLogout
+          onPress={() =>
+            setShowSettingsMenu(
+              value => !value
+            )
           }
           style={
             styles.topButton
           }
           hitSlop={8}
-          disabled={
-            logoutLoading
-          }
         >
-          {logoutLoading ? (
-            <ActivityIndicator
-              size="small"
-              color="#64748B"
-            />
-          ) : (
-            <LogOut
-              size={21}
-              color="#0F172A"
-            />
-          )}
+          <MoreVertical
+            size={24}
+            color="#0F172A"
+            strokeWidth={2}
+          />
         </Pressable>
       </View>
+
+
+      {showSettingsMenu ? (
+        <>
+          <Pressable
+            style={
+              styles.menuBackdrop
+            }
+            onPress={() =>
+              setShowSettingsMenu(
+                false
+              )
+            }
+          />
+
+          <View
+            style={
+              styles.settingsMenu
+            }
+          >
+            <Pressable
+              style={
+                styles.settingsItem
+              }
+              onPress={
+                openEditProfile
+              }
+            >
+              <PencilLine
+                size={19}
+                color="#0F172A"
+              />
+
+              <Text
+                style={
+                  styles.settingsItemText
+                }
+              >
+                Edit Profil
+              </Text>
+
+              <ChevronRight
+                size={18}
+                color="#94A3B8"
+              />
+            </Pressable>
+
+
+            <Pressable
+              style={
+                styles.settingsItem
+              }
+              onPress={() => {
+                setShowSettingsMenu(
+                  false
+                );
+
+                Alert.alert(
+                  "Pengaturan akun",
+                  "Menu pengaturan akun akan kita lengkapi pada tahap berikutnya."
+                );
+              }}
+            >
+              <Settings
+                size={19}
+                color="#0F172A"
+              />
+
+              <Text
+                style={
+                  styles.settingsItemText
+                }
+              >
+                Pengaturan akun
+              </Text>
+
+              <ChevronRight
+                size={18}
+                color="#94A3B8"
+              />
+            </Pressable>
+
+
+            <Pressable
+              style={
+                styles.settingsItem
+              }
+              onPress={() => {
+                setShowSettingsMenu(
+                  false
+                );
+
+                Alert.alert(
+                  "Privasi",
+                  "Pengaturan privasi akan kita lengkapi pada tahap berikutnya."
+                );
+              }}
+            >
+              <Shield
+                size={19}
+                color="#0F172A"
+              />
+
+              <Text
+                style={
+                  styles.settingsItemText
+                }
+              >
+                Privasi
+              </Text>
+
+              <ChevronRight
+                size={18}
+                color="#94A3B8"
+              />
+            </Pressable>
+
+
+            <View
+              style={
+                styles.settingsDivider
+              }
+            />
+
+
+            <Pressable
+              style={
+                styles.settingsItem
+              }
+              disabled={
+                logoutLoading
+              }
+              onPress={() => {
+                setShowSettingsMenu(
+                  false
+                );
+
+                confirmLogout();
+              }}
+            >
+              {logoutLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#DC2626"
+                />
+              ) : (
+                <LogOut
+                  size={19}
+                  color="#DC2626"
+                />
+              )}
+
+              <Text
+                style={[
+                  styles.settingsItemText,
+                  styles.logoutText,
+                ]}
+              >
+                Keluar akun
+              </Text>
+            </Pressable>
+          </View>
+        </>
+      ) : null}
+
+
+      <Modal
+        visible={
+          showEditProfile
+        }
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={() =>
+          setShowEditProfile(
+            false
+          )
+        }
+      >
+        <SafeAreaView
+          style={
+            styles.editSafeArea
+          }
+          edges={[
+            "top",
+            "bottom",
+          ]}
+        >
+          <StatusBar
+            barStyle="dark-content"
+            backgroundColor="#F5F5F5"
+          />
+
+
+          <View
+            style={
+              styles.editTopBar
+            }
+          >
+            <Pressable
+              style={
+                styles.topButton
+              }
+              onPress={() =>
+                setShowEditProfile(
+                  false
+                )
+              }
+              hitSlop={8}
+            >
+              <ArrowLeft
+                size={25}
+                color="#0F172A"
+              />
+            </Pressable>
+
+            <Text
+              style={
+                styles.editTopTitle
+              }
+            >
+              Edit Profil
+            </Text>
+
+            <View
+              style={
+                styles.topButton
+              }
+            />
+          </View>
+
+
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={
+              false
+            }
+            contentContainerStyle={
+              styles.editContent
+            }
+          >
+
+            <Pressable
+              style={
+                styles.editAvatarButton
+              }
+              onPress={() =>
+                void handleChangePhoto()
+              }
+              disabled={
+                photoUploading
+              }
+            >
+              <View
+                style={
+                  styles.editAvatar
+                }
+              >
+                {avatarUrl ? (
+                  <Image
+                    source={{
+                      uri:
+                        avatarUrl,
+                    }}
+                    style={
+                      styles.editAvatarImage
+                    }
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <Text
+                    style={
+                      styles.editAvatarText
+                    }
+                  >
+                    {getInitial(
+                      editName ||
+                        name
+                    )}
+                  </Text>
+                )}
+
+                <View
+                  style={
+                    styles.cameraBadge
+                  }
+                >
+                  <Camera
+                    size={22}
+                    color="#FFFFFF"
+                    strokeWidth={2.2}
+                  />
+                </View>
+              </View>
+
+              <Text
+                style={
+                  styles.changePhotoText
+                }
+              >
+                {photoUploading
+                  ? "Mengunggah..."
+                  : "Ganti foto"}
+              </Text>
+            </Pressable>
+
+
+            <View
+              style={
+                styles.editCard
+              }
+            >
+              <View
+                style={
+                  styles.editFieldRow
+                }
+              >
+                <Text
+                  style={
+                    styles.editFieldLabel
+                  }
+                >
+                  Nama
+                </Text>
+
+                <TextInput
+                  value={
+                    editName
+                  }
+                  onChangeText={
+                    setEditName
+                  }
+                  style={
+                    styles.editFieldInput
+                  }
+                  placeholder="Nama"
+                  placeholderTextColor="#94A3B8"
+                  maxLength={60}
+                  textAlign="right"
+                />
+              </View>
+
+
+              <View
+                style={
+                  styles.editDivider
+                }
+              />
+
+
+              <View
+                style={
+                  styles.editFieldRow
+                }
+              >
+                <Text
+                  style={
+                    styles.editFieldLabel
+                  }
+                >
+                  Username
+                </Text>
+
+                <View
+                  style={
+                    styles.usernameInputWrap
+                  }
+                >
+                  <Text
+                    style={
+                      styles.usernamePrefix
+                    }
+                  >
+                    @
+                  </Text>
+
+                  <TextInput
+                    value={
+                      editUsername
+                    }
+                    onChangeText={
+                      setEditUsername
+                    }
+                    style={
+                      styles.usernameEditInput
+                    }
+                    placeholder="username"
+                    placeholderTextColor="#94A3B8"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    maxLength={30}
+                  />
+                </View>
+              </View>
+
+
+              <View
+                style={
+                  styles.editDivider
+                }
+              />
+
+
+              <View
+                style={
+                  styles.profileLinkRow
+                }
+              >
+                <Text
+                  style={
+                    styles.editFieldLabel
+                  }
+                >
+                  Link profil
+                </Text>
+
+                <Text
+                  style={
+                    styles.profileLink
+                  }
+                  numberOfLines={1}
+                >
+                  diginaz.id/@{
+                    editUsername ||
+                    "diginaz"
+                  }
+                </Text>
+              </View>
+            </View>
+
+
+            <Text
+              style={
+                styles.editSectionTitle
+              }
+            >
+              Info dasar
+            </Text>
+
+
+            <View
+              style={
+                styles.editCard
+              }
+            >
+              <View
+                style={
+                  styles.bioEditRow
+                }
+              >
+                <Text
+                  style={
+                    styles.editFieldLabel
+                  }
+                >
+                  Bio
+                </Text>
+
+                <TextInput
+                  value={
+                    editBio
+                  }
+                  onChangeText={
+                    setEditBio
+                  }
+                  style={
+                    styles.bioEditInput
+                  }
+                  placeholder="Tambahkan bio"
+                  placeholderTextColor="#94A3B8"
+                  multiline
+                  maxLength={160}
+                  textAlignVertical="top"
+                />
+              </View>
+
+              <Text
+                style={
+                  styles.bioCounter
+                }
+              >
+                {editBio.length}/160
+              </Text>
+            </View>
+
+
+            <Pressable
+              style={[
+                styles.saveProfileButton,
+                savingProfile &&
+                  styles.saveProfileButtonDisabled,
+              ]}
+              disabled={
+                savingProfile
+              }
+              onPress={() =>
+                void saveProfileChanges()
+              }
+            >
+              {savingProfile ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#FFFFFF"
+                />
+              ) : (
+                <Text
+                  style={
+                    styles.saveProfileButtonText
+                  }
+                >
+                  Simpan perubahan
+                </Text>
+              )}
+            </Pressable>
+
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
 
 
       {loading ? (
@@ -725,9 +1934,11 @@ export default function ProfileScreen({
                   }
                   numberOfLines={1}
                 >
-                  {getUsername(
-                    email
-                  )}
+                  {username
+                    ? `@${username}`
+                    : getUsername(
+                        email
+                      )}
                 </Text>
 
 
@@ -738,7 +1949,19 @@ export default function ProfileScreen({
                   styles.avatar
                 }
               >
-                <Text
+                {avatarUrl ? (
+                  <Image
+                    source={{
+                      uri:
+                        avatarUrl,
+                    }}
+                    style={
+                      styles.profileAvatarImage
+                    }
+                    resizeMode="cover"
+                  />
+                ) : (
+<Text
                   style={
                     styles.avatarText
                   }
@@ -747,6 +1970,7 @@ export default function ProfileScreen({
                     name
                   )}
                 </Text>
+                )}
               </View>
             </View>
 
@@ -1115,6 +2339,7 @@ const styles =
 
     bioSection: {
       marginTop: 4,
+      marginBottom: 24,
     },
 
     bioText: {
@@ -1156,9 +2381,6 @@ const styles =
       alignItems: "center",
       justifyContent:
         "center",
-      borderBottomWidth: 2,
-      borderBottomColor:
-        "#0F172A",
     },
 
     activeTabText: {
@@ -1250,4 +2472,290 @@ const styles =
       color: "#94A3B8",
       fontFamily: "PlusJakartaSans_400Regular",
     },
+
+    menuBackdrop: {
+      position: "absolute",
+      top: 56,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      zIndex: 20,
+    },
+
+    settingsMenu: {
+      position: "absolute",
+      top: 52,
+      right: 12,
+      width: 230,
+      paddingVertical: 6,
+      borderRadius: 14,
+      backgroundColor: "#FFFFFF",
+      borderWidth:
+        StyleSheet.hairlineWidth,
+      borderColor: "#E2E8F0",
+      zIndex: 30,
+      elevation: 10,
+      shadowColor: "#000000",
+      shadowOpacity: 0.12,
+      shadowRadius: 14,
+      shadowOffset: {
+        width: 0,
+        height: 5,
+      },
+    },
+
+    settingsItem: {
+      minHeight: 48,
+      paddingHorizontal: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 11,
+    },
+
+    settingsItemText: {
+      flex: 1,
+      fontSize: 13,
+      color: "#0F172A",
+      fontFamily:
+        "PlusJakartaSans_500Medium",
+    },
+
+    settingsDivider: {
+      height:
+        StyleSheet.hairlineWidth,
+      marginVertical: 4,
+      backgroundColor: "#E2E8F0",
+    },
+
+    logoutText: {
+      color: "#DC2626",
+    },
+
+
+    editSafeArea: {
+      flex: 1,
+      backgroundColor: "#F5F5F5",
+    },
+
+    editTopBar: {
+      height: 56,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent:
+        "space-between",
+      backgroundColor: "#F5F5F5",
+    },
+
+    editTopTitle: {
+      fontSize: 18,
+      color: "#0F172A",
+      fontFamily:
+        "PlusJakartaSans_700Bold",
+    },
+
+    editContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 40,
+    },
+
+    editAvatarButton: {
+      alignItems: "center",
+      paddingTop: 18,
+      paddingBottom: 28,
+    },
+
+    editAvatar: {
+      width: 116,
+      height: 116,
+      borderRadius: 58,
+      backgroundColor: "#D9D9D9",
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: 2,
+      borderColor: "#FFFFFF",
+    },
+
+    editAvatarImage: {
+      width: "100%",
+      height: "100%",
+      borderRadius: 58,
+    },
+
+    editAvatarText: {
+      fontSize: 42,
+      color: "#FFFFFF",
+      fontFamily:
+        "PlusJakartaSans_700Bold",
+    },
+
+    cameraBadge: {
+      position: "absolute",
+      right: 8,
+      bottom: 7,
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor:
+        "rgba(15,23,42,0.82)",
+      borderWidth: 2,
+      borderColor: "#FFFFFF",
+    },
+
+    changePhotoText: {
+      marginTop: 12,
+      fontSize: 15,
+      color: "#0F8A8A",
+      fontFamily:
+        "PlusJakartaSans_700Bold",
+    },
+
+    editCard: {
+      borderRadius: 14,
+      backgroundColor: "#FFFFFF",
+      overflow: "hidden",
+    },
+
+    editFieldRow: {
+      minHeight: 62,
+      paddingHorizontal: 16,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+
+    editFieldLabel: {
+      width: 96,
+      fontSize: 14,
+      color: "#64748B",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+    },
+
+    editFieldInput: {
+      flex: 1,
+      paddingVertical: 10,
+      paddingHorizontal: 0,
+      fontSize: 14,
+      color: "#0F172A",
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+    },
+
+    editDivider: {
+      height:
+        StyleSheet.hairlineWidth,
+      marginLeft: 16,
+      backgroundColor: "#E2E8F0",
+    },
+
+    usernameInputWrap: {
+      flex: 1,
+      minHeight: 48,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+    },
+
+    usernamePrefix: {
+      fontSize: 14,
+      color: "#0F172A",
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+    },
+
+    usernameEditInput: {
+      minWidth: 90,
+      maxWidth: 190,
+      paddingVertical: 8,
+      paddingHorizontal: 0,
+      fontSize: 14,
+      color: "#0F172A",
+      textAlign: "right",
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+    },
+
+    profileLinkRow: {
+      minHeight: 58,
+      paddingHorizontal: 16,
+      flexDirection: "row",
+      alignItems: "center",
+    },
+
+    profileLink: {
+      flex: 1,
+      fontSize: 12,
+      textAlign: "right",
+      color: "#475569",
+      fontFamily:
+        "PlusJakartaSans_500Medium",
+    },
+
+    editSectionTitle: {
+      marginTop: 24,
+      marginBottom: 9,
+      marginLeft: 4,
+      fontSize: 13,
+      color: "#94A3B8",
+      fontFamily:
+        "PlusJakartaSans_500Medium",
+    },
+
+    bioEditRow: {
+      minHeight: 112,
+      paddingHorizontal: 16,
+      paddingTop: 15,
+      flexDirection: "row",
+      alignItems: "flex-start",
+    },
+
+    bioEditInput: {
+      flex: 1,
+      minHeight: 82,
+      padding: 0,
+      fontSize: 14,
+      lineHeight: 20,
+      color: "#0F172A",
+      fontFamily:
+        "PlusJakartaSans_500Medium",
+    },
+
+    bioCounter: {
+      paddingRight: 16,
+      paddingBottom: 10,
+      textAlign: "right",
+      fontSize: 10,
+      color: "#94A3B8",
+      fontFamily:
+        "PlusJakartaSans_400Regular",
+    },
+
+    saveProfileButton: {
+      height: 48,
+      marginTop: 24,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "#2563EB",
+    },
+
+    saveProfileButtonDisabled: {
+      opacity: 0.6,
+    },
+
+    saveProfileButtonText: {
+      fontSize: 14,
+      color: "#FFFFFF",
+      fontFamily:
+        "PlusJakartaSans_700Bold",
+    },
+    profileAvatarImage: {
+      width: "100%",
+      height: "100%",
+      borderRadius: 999,
+    },
+
+
   });
