@@ -1,12 +1,15 @@
 import { getLocalUser } from "../lib/localAuth";
+
 import React, {
   useEffect,
+  useMemo,
   useState,
 } from "react";
 
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   StatusBar,
@@ -17,11 +20,9 @@ import {
 
 import {
   ArrowLeft,
-  BookOpen,
-  GraduationCap,
+  Grid3X3,
   LogOut,
-  Mail,
-  UserRound,
+  PackageOpen,
 } from "lucide-react-native";
 
 import {
@@ -31,6 +32,11 @@ import {
 import {
   supabase,
 } from "../lib/supabase";
+
+import type {
+  StoreProductCardItem,
+} from "../lib/storeProducts";
+
 
 type ProfileRow = {
   id: string;
@@ -42,11 +48,21 @@ type ProfileRow = {
   school_id: string | null;
   class_level: string | null;
   subject_id: string | null;
+  bio: string | null;
 };
+
 
 type Props = {
   onBack: () => void;
+
+  products:
+    StoreProductCardItem[];
+
+  onOpenProduct: (
+    product: StoreProductCardItem
+  ) => void;
 };
+
 
 function roleLabel(
   value: string | null
@@ -71,6 +87,7 @@ function roleLabel(
   }
 }
 
+
 function getInitial(
   name: string
 ) {
@@ -86,9 +103,31 @@ function getInitial(
     .toUpperCase();
 }
 
+
+function getUsername(
+  email: string
+) {
+  const local =
+    email
+      .trim()
+      .split("@")[0]
+      ?.replace(
+        /[^a-zA-Z0-9._-]/g,
+        ""
+      );
+
+  return local
+    ? `@${local}`
+    : "@diginaz";
+}
+
+
 export default function ProfileScreen({
   onBack,
+  products,
+  onOpenProduct,
 }: Props) {
+
   const [
     loading,
     setLoading,
@@ -103,6 +142,13 @@ export default function ProfileScreen({
     errorMessage,
     setErrorMessage,
   ] = useState("");
+
+  const [
+    currentUserId,
+    setCurrentUserId,
+  ] = useState<string | null>(
+    null
+  );
 
   const [
     name,
@@ -123,28 +169,67 @@ export default function ProfileScreen({
     useState<string | null>(
       null
     );
+  const [
+    bio,
+    setBio,
+  ] = useState("");
 
   const [
-    classLevel,
-    setClassLevel,
-  ] =
-    useState<string | null>(
-      null
-    );
+    followerCount,
+    setFollowerCount,
+  ] = useState(0);
 
   const [
-    subjectId,
-    setSubjectId,
-  ] =
-    useState<string | null>(
-      null
+    followingCount,
+    setFollowingCount,
+  ] = useState(0);
+
+  const [
+    likeCount,
+    setLikeCount,
+  ] = useState(0);
+
+
+  const myProducts =
+    useMemo(
+      () =>
+        currentUserId
+          ? products.filter(
+              (product) =>
+                product.creatorUserId ===
+                currentUserId
+            )
+          : [],
+      [
+        products,
+        currentUserId,
+      ]
     );
+
+
+  const totalDownloads =
+    useMemo(
+      () =>
+        myProducts.reduce(
+          (
+            total,
+            product
+          ) =>
+            total +
+            Number(
+              product.downloadCount ??
+                0
+            ),
+          0
+        ),
+      [myProducts]
+    );
+
 
   useEffect(() => {
     let active = true;
 
     async function loadProfile() {
-      setLoading(true);
       setErrorMessage("");
 
       try {
@@ -180,6 +265,29 @@ export default function ProfileScreen({
         const fallbackEmail =
           user.email ?? "";
 
+        if (!active) {
+          return;
+        }
+
+        /*
+         * Tampilkan data lokal dulu.
+         * Profil tidak menunggu query server.
+         */
+        setCurrentUserId(
+          user.id
+        );
+
+        setName(
+          fallbackName
+        );
+
+        setEmail(
+          fallbackEmail
+        );
+
+        setLoading(false);
+
+
         let profileRow:
           ProfileRow | null =
           null;
@@ -191,7 +299,7 @@ export default function ProfileScreen({
           await supabase
             .from("app_profiles")
             .select(
-              "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id"
+              "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id,bio"
             )
             .eq(
               "auth_user_id",
@@ -205,8 +313,10 @@ export default function ProfileScreen({
 
         if (byAuthId) {
           profileRow =
-            byAuthId as unknown as ProfileRow;
-        } else if (
+            byAuthId as unknown as
+              ProfileRow;
+        }
+        else if (
           fallbackEmail
         ) {
           const {
@@ -218,7 +328,7 @@ export default function ProfileScreen({
                 "app_profiles"
               )
               .select(
-                "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id"
+                "id,auth_user_id,email,full_name,app_role,status,school_id,class_level,subject_id,bio"
               )
               .ilike(
                 "email",
@@ -235,7 +345,8 @@ export default function ProfileScreen({
 
           if (byEmail) {
             profileRow =
-              byEmail as unknown as ProfileRow;
+              byEmail as unknown as
+                ProfileRow;
           }
         }
 
@@ -262,19 +373,15 @@ export default function ProfileScreen({
             ?.app_role ??
             null
         );
-
-        setClassLevel(
+        setBio(
           profileRow
-            ?.class_level ??
-            null
+            ?.bio
+            ?.trim() ??
+            ""
         );
 
-        setSubjectId(
-          profileRow
-            ?.subject_id ??
-            null
-        );
       } catch (error) {
+
         console.error(
           "Gagal memuat profil:",
           error
@@ -286,9 +393,7 @@ export default function ProfileScreen({
               ? error.message
               : "Profil belum dapat dimuat."
           );
-        }
-      } finally {
-        if (active) {
+
           setLoading(false);
         }
       }
@@ -301,6 +406,146 @@ export default function ProfileScreen({
     };
   }, []);
 
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSocialStats() {
+      if (!currentUserId) {
+        return;
+      }
+
+      try {
+        const [
+          followersResult,
+          followingResult,
+        ] =
+          await Promise.all([
+            supabase
+              .from(
+                "app_profile_follows"
+              )
+              .select(
+                "follower_user_id",
+                {
+                  count: "exact",
+                  head: true,
+                }
+              )
+              .eq(
+                "following_user_id",
+                currentUserId
+              ),
+
+            supabase
+              .from(
+                "app_profile_follows"
+              )
+              .select(
+                "following_user_id",
+                {
+                  count: "exact",
+                  head: true,
+                }
+              )
+              .eq(
+                "follower_user_id",
+                currentUserId
+              ),
+          ]);
+
+        if (
+          followersResult.error
+        ) {
+          throw followersResult.error;
+        }
+
+        if (
+          followingResult.error
+        ) {
+          throw followingResult.error;
+        }
+
+        const productIds =
+          products
+            .filter(
+              (product) =>
+                product.creatorUserId ===
+                currentUserId
+            )
+            .map(
+              (product) =>
+                product.id
+            );
+
+        let receivedLikes = 0;
+
+        if (
+          productIds.length > 0
+        ) {
+          const likesResult =
+            await supabase
+              .from(
+                "store_product_likes"
+              )
+              .select(
+                "product_id",
+                {
+                  count: "exact",
+                  head: true,
+                }
+              )
+              .in(
+                "product_id",
+                productIds
+              );
+
+          if (
+            likesResult.error
+          ) {
+            throw likesResult.error;
+          }
+
+          receivedLikes =
+            likesResult.count ?? 0;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setFollowerCount(
+          followersResult.count ??
+            0
+        );
+
+        setFollowingCount(
+          followingResult.count ??
+            0
+        );
+
+        setLikeCount(
+          receivedLikes
+        );
+
+      } catch (error) {
+        console.warn(
+          "Statistik sosial gagal dimuat:",
+          error
+        );
+      }
+    }
+
+    void loadSocialStats();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    currentUserId,
+    products,
+  ]);
+
   async function handleLogout() {
     if (logoutLoading) {
       return;
@@ -310,9 +555,12 @@ export default function ProfileScreen({
     setErrorMessage("");
 
     try {
-      const { GoogleSignin } = await import(
-        "@react-native-google-signin/google-signin"
-      );
+      const {
+        GoogleSignin,
+      } =
+        await import(
+          "@react-native-google-signin/google-signin"
+        );
 
       await GoogleSignin.signOut();
 
@@ -325,6 +573,7 @@ export default function ProfileScreen({
       if (error) {
         throw error;
       }
+
     } catch (error) {
       console.error(
         "Logout gagal:",
@@ -336,15 +585,17 @@ export default function ProfileScreen({
           ? error.message
           : "Belum dapat keluar."
       );
+
     } finally {
       setLogoutLoading(false);
     }
   }
 
+
   function confirmLogout() {
     Alert.alert(
       "Keluar dari Diginaz?",
-      "Anda perlu masuk kembali dengan akun Google untuk menggunakan Diginaz Store.",
+      "Anda perlu masuk kembali untuk menggunakan Diginaz.",
       [
         {
           text: "Batal",
@@ -361,6 +612,7 @@ export default function ProfileScreen({
     );
   }
 
+
   return (
     <SafeAreaView
       style={styles.safeArea}
@@ -374,321 +626,402 @@ export default function ProfileScreen({
         backgroundColor="#FFFFFF"
       />
 
-      <View style={styles.header}>
+
+      <View
+        style={styles.topBar}
+      >
         <Pressable
           onPress={onBack}
-          style={styles.backButton}
+          style={
+            styles.topButton
+          }
           hitSlop={8}
         >
           <ArrowLeft
-            size={21}
+            size={24}
             color="#0F172A"
           />
         </Pressable>
 
-        <Text style={styles.headerTitle}>
+        <Text
+          style={styles.topTitle}
+        >
           Profil
         </Text>
 
-        <View
-          style={styles.headerSpacer}
-        />
+        <Pressable
+          onPress={
+            confirmLogout
+          }
+          style={
+            styles.topButton
+          }
+          hitSlop={8}
+          disabled={
+            logoutLoading
+          }
+        >
+          {logoutLoading ? (
+            <ActivityIndicator
+              size="small"
+              color="#64748B"
+            />
+          ) : (
+            <LogOut
+              size={21}
+              color="#0F172A"
+            />
+          )}
+        </Pressable>
       </View>
 
+
       {loading ? (
-        <View style={styles.center}>
+        <View
+          style={styles.center}
+        >
           <ActivityIndicator
             size="small"
             color="#2563EB"
           />
-
-          <Text style={styles.loadingText}>
-            Memuat profil...
-          </Text>
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={
-            styles.content
-          }
           showsVerticalScrollIndicator={
             false
           }
+          contentContainerStyle={
+            styles.content
+          }
         >
-          <View
-            style={styles.profileCard}
-          >
-            <View
-              style={styles.avatar}
-            >
-              <Text
-                style={styles.avatarText}
-              >
-                {getInitial(name)}
-              </Text>
-            </View>
-
-            <Text
-              style={styles.name}
-            >
-              {name}
-            </Text>
-
-            <Text
-              style={styles.role}
-            >
-              {roleLabel(role)}
-            </Text>
-          </View>
 
           <View
-            style={styles.infoCard}
+            style={
+              styles.profileHero
+            }
           >
             <View
-              style={styles.infoRow}
+              style={
+                styles.identityRow
+              }
             >
               <View
-                style={styles.infoIcon}
-              >
-                <Mail
-                  size={17}
-                  color="#2563EB"
-                />
-              </View>
-
-              <View
-                style={styles.infoText}
+                style={
+                  styles.identityText
+                }
               >
                 <Text
-                  style={styles.infoLabel}
+                  style={
+                    styles.name
+                  }
+                  numberOfLines={2}
                 >
-                  Email
+                  {name}
                 </Text>
 
                 <Text
-                  style={styles.infoValue}
+                  style={
+                    styles.username
+                  }
                   numberOfLines={1}
                 >
-                  {email ||
-                    "-"}
+                  {getUsername(
+                    email
+                  )}
                 </Text>
-              </View>
-            </View>
 
-            <View
-              style={styles.divider}
-            />
 
-            <View
-              style={styles.infoRow}
-            >
-              <View
-                style={styles.infoIcon}
-              >
-                <UserRound
-                  size={17}
-                  color="#2563EB"
-                />
               </View>
 
               <View
-                style={styles.infoText}
+                style={
+                  styles.avatar
+                }
               >
                 <Text
-                  style={styles.infoLabel}
+                  style={
+                    styles.avatarText
+                  }
                 >
-                  Jenis Akun
-                </Text>
-
-                <Text
-                  style={styles.infoValue}
-                >
-                  {roleLabel(
-                    role
+                  {getInitial(
+                    name
                   )}
                 </Text>
               </View>
             </View>
 
-            {classLevel ? (
-              <>
-                <View
-                  style={styles.divider}
-                />
 
-                <View
-                  style={styles.infoRow}
+            <View
+              style={
+                styles.socialStats
+              }
+            >
+              <View
+                style={
+                  styles.socialStat
+                }
+              >
+                <Text
+                  style={
+                    styles.socialNumber
+                  }
                 >
-                  <View
-                    style={
-                      styles.infoIcon
-                    }
-                  >
-                    <GraduationCap
-                      size={17}
-                      color="#2563EB"
-                    />
-                  </View>
+                  {followingCount}
+                </Text>
 
-                  <View
-                    style={
-                      styles.infoText
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.infoLabel
-                      }
-                    >
-                      Kelas
-                    </Text>
-
-                    <Text
-                      style={
-                        styles.infoValue
-                      }
-                    >
-                      {
-                        classLevel
-                      }
-                    </Text>
-                  </View>
-                </View>
-              </>
-            ) : null}
-
-            {subjectId ? (
-              <>
-                <View
-                  style={styles.divider}
-                />
-
-                <View
-                  style={styles.infoRow}
+                <Text
+                  style={
+                    styles.socialLabel
+                  }
                 >
-                  <View
-                    style={
-                      styles.infoIcon
-                    }
-                  >
-                    <BookOpen
-                      size={17}
-                      color="#2563EB"
-                    />
-                  </View>
+                  Mengikuti
+                </Text>
+              </View>
 
-                  <View
-                    style={
-                      styles.infoText
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.infoLabel
-                      }
-                    >
-                      Mata Pelajaran
-                    </Text>
+              <View
+                style={
+                  styles.socialStat
+                }
+              >
+                <Text
+                  style={
+                    styles.socialNumber
+                  }
+                >
+                  {followerCount}
+                </Text>
 
-                    <Text
-                      style={
-                        styles.infoValue
-                      }
-                    >
-                      {subjectId}
-                    </Text>
-                  </View>
-                </View>
-              </>
-            ) : null}
+                <Text
+                  style={
+                    styles.socialLabel
+                  }
+                >
+                  Pengikut
+                </Text>
+              </View>
+
+              <View
+                style={
+                  styles.socialStat
+                }
+              >
+                <Text
+                  style={
+                    styles.socialNumber
+                  }
+                >
+                  {likeCount}
+                </Text>
+
+                <Text
+                  style={
+                    styles.socialLabel
+                  }
+                >
+                  Suka
+                </Text>
+              </View>
+            </View>
+
+
+            <View
+              style={
+                styles.bioSection
+              }
+            >
+              <Text
+                style={
+                  styles.bioText
+                }
+              >
+                {bio ||
+                  "Belum ada bio."}
+              </Text>
+            </View>
           </View>
 
           {errorMessage ? (
             <Text
-              style={styles.errorText}
+              style={
+                styles.errorText
+              }
             >
               {errorMessage}
             </Text>
           ) : null}
 
-          <Pressable
-            onPress={confirmLogout}
-            disabled={
-              logoutLoading
-            }
-            style={[
-              styles.logoutButton,
-              logoutLoading &&
-                styles.logoutDisabled,
-            ]}
-          >
-            {logoutLoading ? (
-              <ActivityIndicator
-                size="small"
-                color="#DC2626"
-              />
-            ) : (
-              <>
-                <LogOut
-                  size={18}
-                  color="#DC2626"
-                />
 
-                <Text
-                  style={
-                    styles.logoutText
-                  }
-                >
-                  Keluar
-                </Text>
-              </>
-            )}
-          </Pressable>
+          <View
+            style={styles.tabBar}
+          >
+            <View
+              style={
+                styles.activeTab
+              }
+            >
+              <Grid3X3
+                size={19}
+                color="#0F172A"
+                strokeWidth={2.1}
+              />
+
+              <Text
+                style={
+                  styles.activeTabText
+                }
+              >
+                Produk Saya
+              </Text>
+            </View>
+          </View>
+
+
+          {myProducts.length ===
+          0 ? (
+            <View
+              style={styles.empty}
+            >
+              <PackageOpen
+                size={32}
+                color="#94A3B8"
+              />
+
+              <Text
+                style={
+                  styles.emptyTitle
+                }
+              >
+                Belum ada produk
+              </Text>
+
+              <Text
+                style={
+                  styles.emptyText
+                }
+              >
+                Produk yang Anda
+                publikasikan akan
+                tampil di sini.
+              </Text>
+            </View>
+          ) : (
+            <View
+              style={styles.grid}
+            >
+              {myProducts.map(
+                (product) => (
+                  <Pressable
+                    key={
+                      product.id
+                    }
+                    onPress={() =>
+                      onOpenProduct(
+                        product
+                      )
+                    }
+                    style={
+                      styles.gridItem
+                    }
+                  >
+                    <View
+                      style={
+                        styles.productVisual
+                      }
+                    >
+                      {product.thumbnailUrl ? (
+                        <Image
+                          source={{
+                            uri:
+                              product.thumbnailUrl,
+                          }}
+                          style={
+                            styles.productImage
+                          }
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <View
+                          style={
+                            styles.productPlaceholder
+                          }
+                        >
+                          <PackageOpen
+                            size={28}
+                            color="#94A3B8"
+                          />
+                        </View>
+                      )}
+
+                      <View
+                        style={
+                          styles.productOverlay
+                        }
+                      >
+                        <Text
+                          style={
+                            styles.productTitle
+                          }
+                          numberOfLines={2}
+                        >
+                          {product.title}
+                        </Text>
+
+                        <Text
+                          style={
+                            styles.productPrice
+                          }
+                          numberOfLines={1}
+                        >
+                          {product.price}
+                        </Text>
+                      </View>
+                    </View>
+                  </Pressable>
+                )
+              )}
+            </View>
+          )}
+
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
+
 const styles =
   StyleSheet.create({
     safeArea: {
       flex: 1,
       backgroundColor:
-        "#F8FAFC",
+        "#FFFFFF",
     },
 
-    header: {
-      height: 62,
-      paddingHorizontal: 12,
-      backgroundColor:
-        "#FFFFFF",
-      borderBottomWidth: 1,
-      borderBottomColor:
-        "#E2E8F0",
+    topBar: {
+      height: 56,
+      paddingHorizontal: 16,
       flexDirection: "row",
       alignItems: "center",
       justifyContent:
         "space-between",
+      borderBottomWidth:
+        StyleSheet.hairlineWidth,
+      borderBottomColor:
+        "#E2E8F0",
     },
 
-    backButton: {
-      width: 40,
-      height: 40,
+    topButton: {
+      width: 44,
+      height: 44,
       alignItems: "center",
       justifyContent:
         "center",
     },
 
-    headerTitle: {
-      fontFamily:
-        "PlusJakartaSans_600SemiBold",
-      fontSize: 15,
+    topTitle: {
+      fontSize: 16,
+      fontFamily: "PlusJakartaSans_700Bold",
       color: "#0F172A",
-    },
-
-    headerSpacer: {
-      width: 40,
     },
 
     center: {
@@ -696,153 +1029,225 @@ const styles =
       alignItems: "center",
       justifyContent:
         "center",
-      gap: 8,
-    },
-
-    loadingText: {
-      fontFamily:
-        "PlusJakartaSans_400Regular",
-      fontSize: 10.5,
-      color: "#64748B",
     },
 
     content: {
-      padding: 16,
-      paddingBottom: 32,
+      paddingBottom: 36,
     },
 
-    profileCard: {
-      alignItems: "center",
-      paddingVertical: 22,
-      paddingHorizontal: 16,
-      borderRadius: 18,
-      borderWidth: 1,
-      borderColor: "#E2E8F0",
-      backgroundColor:
-        "#FFFFFF",
+    profileHero: {
+      paddingTop: 8,
+      paddingHorizontal: 20,
+      paddingBottom: 0,
+    },
+
+    identityRow: {
+      position: "relative",
+    },
+
+    identityText: {
+      paddingRight: 100,
     },
 
     avatar: {
-      width: 72,
-      height: 72,
-      borderRadius: 36,
+      position: "absolute",
+      top: 0,
+      right: 0,
+      width: 84,
+      height: 84,
+      borderRadius: 42,
+      backgroundColor:
+        "#E8F0FF",
       alignItems: "center",
       justifyContent:
         "center",
-      backgroundColor:
-        "#DBEAFE",
+      borderWidth: 1,
+      borderColor:
+        "#D7E3FA",
     },
 
     avatarText: {
-      fontFamily:
-        "PlusJakartaSans_700Bold",
-      fontSize: 26,
+      fontSize: 35,
+      fontFamily: "PlusJakartaSans_700Bold",
       color: "#2563EB",
     },
 
     name: {
-      marginTop: 12,
-      fontFamily:
-        "PlusJakartaSans_600SemiBold",
-      fontSize: 16,
+      fontSize: 25,
+      lineHeight: 29,
+      fontFamily: "PlusJakartaSans_700Bold",
       color: "#0F172A",
+    },
+
+    username: {
+      marginTop: 0,
+      fontSize: 11,
+      color: "#64748B",
+      fontFamily: "PlusJakartaSans_400Regular",
+    },
+
+
+    socialStats: {
+      marginTop: 7,
+      width: "64%",
+      paddingRight: 6,
+      flexDirection: "row",
+      alignItems: "flex-start",
+      justifyContent: "space-between",
+    },
+
+    socialStat: {
+      marginRight: 0,
+    },
+
+    socialNumber: {
+      fontSize: 16,
+      fontFamily: "PlusJakartaSans_700Bold",
+      color: "#0F172A",
+    },
+
+    socialLabel: {
+      marginTop: 0,
+      fontSize: 12,
+      color: "#64748B",
+      fontFamily: "PlusJakartaSans_400Regular",
+    },
+
+    bioSection: {
+      marginTop: 4,
+    },
+
+    bioText: {
+      fontSize: 14,
+      lineHeight: 19,
+      color: "#0F172A",
+      fontFamily: "PlusJakartaSans_400Regular",
+    },
+    errorText: {
+      marginHorizontal: 20,
+      marginBottom: 12,
+      padding: 10,
+      borderRadius: 10,
+      backgroundColor:
+        "#FEF2F2",
+      color: "#B91C1C",
+      fontSize: 12,
       textAlign: "center",
     },
 
-    role: {
-      marginTop: 3,
-      fontFamily:
-        "PlusJakartaSans_400Regular",
-      fontSize: 10.5,
-      color: "#64748B",
-    },
-
-    infoCard: {
-      marginTop: 14,
-      paddingHorizontal: 14,
-      borderRadius: 18,
-      borderWidth: 1,
+    tabBar: {
+      marginTop: 0,
+      borderTopWidth:
+        StyleSheet.hairlineWidth,
+      borderBottomWidth:
+        StyleSheet.hairlineWidth,
       borderColor: "#E2E8F0",
-      backgroundColor:
-        "#FFFFFF",
-    },
-
-    infoRow: {
-      minHeight: 64,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 11,
-    },
-
-    infoIcon: {
-      width: 36,
-      height: 36,
-      borderRadius: 11,
+      height: 46,
       alignItems: "center",
       justifyContent:
         "center",
-      backgroundColor:
-        "#EFF6FF",
     },
 
-    infoText: {
-      flex: 1,
+    activeTab: {
+      height: "100%",
+      paddingHorizontal: 18,
+      flexDirection: "row",
+      gap: 7,
+      alignItems: "center",
+      justifyContent:
+        "center",
+      borderBottomWidth: 2,
+      borderBottomColor:
+        "#0F172A",
     },
 
-    infoLabel: {
-      fontFamily:
-        "PlusJakartaSans_400Regular",
-      fontSize: 9.5,
-      color: "#94A3B8",
-    },
-
-    infoValue: {
-      marginTop: 2,
-      fontFamily:
-        "PlusJakartaSans_500Medium",
-      fontSize: 11.5,
+    activeTabText: {
+      fontSize: 13,
+      fontFamily: "PlusJakartaSans_700Bold",
       color: "#0F172A",
     },
 
-    divider: {
-      height: 1,
-      marginLeft: 47,
+    grid: {
+      flexDirection: "row",
+      flexWrap: "wrap",
+      paddingTop: 1,
+    },
+
+    gridItem: {
+      width: "33.3333%",
+      padding: 1,
+    },
+
+    productVisual: {
+      aspectRatio: 0.78,
+      backgroundColor:
+        "#F1F5F9",
+      overflow: "hidden",
+    },
+
+    productImage: {
+      width: "100%",
+      height: "100%",
+    },
+
+    productPlaceholder: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent:
+        "center",
       backgroundColor:
         "#F1F5F9",
     },
 
-    errorText: {
-      marginTop: 10,
-      fontFamily:
-        "PlusJakartaSans_400Regular",
-      fontSize: 9.5,
-      lineHeight: 15,
-      color: "#DC2626",
-    },
-
-    logoutButton: {
-      minHeight: 46,
-      marginTop: 18,
-      borderRadius: 13,
-      borderWidth: 1,
-      borderColor: "#FECACA",
+    productOverlay: {
+      position: "absolute",
+      left: 0,
+      right: 0,
+      bottom: 0,
+      minHeight: 56,
+      paddingHorizontal: 7,
+      paddingTop: 16,
+      paddingBottom: 7,
       backgroundColor:
-        "#FEF2F2",
-      flexDirection: "row",
-      alignItems: "center",
+        "rgba(15,23,42,0.70)",
       justifyContent:
-        "center",
-      gap: 8,
+        "flex-end",
     },
 
-    logoutDisabled: {
-      opacity: 0.6,
+    productTitle: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontFamily: "PlusJakartaSans_700Bold",
+      color: "#FFFFFF",
     },
 
-    logoutText: {
-      fontFamily:
-        "PlusJakartaSans_600SemiBold",
-      fontSize: 11.5,
-      color: "#DC2626",
+    productPrice: {
+      marginTop: 2,
+      fontSize: 10,
+      color: "#E2E8F0",
+      fontFamily: "PlusJakartaSans_400Regular",
+    },
+
+    empty: {
+      paddingVertical: 58,
+      paddingHorizontal: 24,
+      alignItems: "center",
+    },
+
+    emptyTitle: {
+      marginTop: 12,
+      fontSize: 15,
+      fontFamily: "PlusJakartaSans_700Bold",
+      color: "#334155",
+    },
+
+    emptyText: {
+      marginTop: 5,
+      maxWidth: 240,
+      fontSize: 12,
+      lineHeight: 18,
+      textAlign: "center",
+      color: "#94A3B8",
+      fontFamily: "PlusJakartaSans_400Regular",
     },
   });

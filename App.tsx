@@ -139,36 +139,86 @@ function ProductCard({
   );
 }
 
+type MainTab =
+  | "store"
+  | "chat"
+  | "upload"
+  | "notifications"
+  | "profile";
+
+
 function BottomNavigation({
+  activeTab,
+  onStorePress,
   onChatPress,
   onUploadPress,
   onNotificationPress,
   onProfilePress,
   unreadNotificationCount,
 }: {
+  activeTab: MainTab;
+  onStorePress: () => void;
   onChatPress: () => void;
   onUploadPress: () => void;
   onNotificationPress: () => void;
   onProfilePress: () => void;
   unreadNotificationCount: number;
 }) {
+  const activeColor =
+    "#2563EB";
+
+  const inactiveColor =
+    "#94A3B8";
+
+  function colorFor(
+    tab: MainTab
+  ) {
+    return activeTab === tab
+      ? activeColor
+      : inactiveColor;
+  }
+
+  function strokeFor(
+    tab: MainTab
+  ) {
+    return activeTab === tab
+      ? 2
+      : 1.8;
+  }
+
+  function labelFor(
+    tab: MainTab
+  ) {
+    return activeTab === tab
+      ? [
+          styles.navLabel,
+          styles.navLabelActive,
+        ]
+      : styles.navLabel;
+  }
+
   return (
     <View style={styles.bottomNav}>
-      <Pressable style={styles.navItem}>
+
+      <Pressable
+        style={styles.navItem}
+        onPress={onStorePress}
+      >
         <Home
           size={21}
-          color="#2563EB"
-          strokeWidth={2}
+          color={colorFor("store")}
+          strokeWidth={
+            strokeFor("store")
+          }
         />
+
         <Text
-          style={[
-            styles.navLabel,
-            styles.navLabelActive,
-          ]}
+          style={labelFor("store")}
         >
           Store
         </Text>
       </Pressable>
+
 
       <Pressable
         style={styles.navItem}
@@ -176,11 +226,19 @@ function BottomNavigation({
       >
         <MessageCircle
           size={21}
-          color="#94A3B8"
-          strokeWidth={1.8}
+          color={colorFor("chat")}
+          strokeWidth={
+            strokeFor("chat")
+          }
         />
-        <Text style={styles.navLabel}>Chat</Text>
+
+        <Text
+          style={labelFor("chat")}
+        >
+          Chat
+        </Text>
       </Pressable>
+
 
       <Pressable
         style={styles.navItem}
@@ -188,13 +246,19 @@ function BottomNavigation({
       >
         <Plus
           size={21}
-          color="#94A3B8"
-          strokeWidth={1.8}
+          color={colorFor("upload")}
+          strokeWidth={
+            strokeFor("upload")
+          }
         />
-        <Text style={styles.navLabel}>
+
+        <Text
+          style={labelFor("upload")}
+        >
           Upload
         </Text>
       </Pressable>
+
 
       <Pressable
         style={styles.navItem}
@@ -209,14 +273,24 @@ function BottomNavigation({
         >
           <Bell
             size={21}
-            color="#94A3B8"
-            strokeWidth={1.8}
+            color={
+              colorFor(
+                "notifications"
+              )
+            }
+            strokeWidth={
+              strokeFor(
+                "notifications"
+              )
+            }
           />
 
           {unreadNotificationCount >
           0 ? (
             <View
-              style={styles.navBadge}
+              style={
+                styles.navBadge
+              }
             >
               <Text
                 style={
@@ -232,8 +306,17 @@ function BottomNavigation({
           ) : null}
         </View>
 
-        <Text style={styles.navLabel}>Notifikasi</Text>
+        <Text
+          style={
+            labelFor(
+              "notifications"
+            )
+          }
+        >
+          Notifikasi
+        </Text>
       </Pressable>
+
 
       <Pressable
         style={styles.navItem}
@@ -241,13 +324,23 @@ function BottomNavigation({
       >
         <UserRound
           size={21}
-          color="#94A3B8"
-          strokeWidth={1.8}
+          color={
+            colorFor("profile")
+          }
+          strokeWidth={
+            strokeFor("profile")
+          }
         />
-        <Text style={styles.navLabel}>
+
+        <Text
+          style={
+            labelFor("profile")
+          }
+        >
           Profil
         </Text>
       </Pressable>
+
     </View>
   );
 }
@@ -296,9 +389,89 @@ function StoreHome() {
 
   const [selectedProduct, setSelectedProduct] =
     useState<StoreProductCardItem | null>(null);
+  const [
+    productOpenedFromProfile,
+    setProductOpenedFromProfile,
+  ] = useState(false);
 
   const [selectedConversationId, setSelectedConversationId] =
     useState<string | null>(null);
+
+
+  function openMainTab(
+    tab: MainTab
+  ) {
+    setShowChatInbox(
+      tab === "chat"
+    );
+
+    setShowUpload(
+      tab === "upload"
+    );
+
+    setShowNotifications(
+      tab === "notifications"
+    );
+
+    setShowProfile(
+      tab === "profile"
+    );
+
+    setSelectedConversationId(
+      null
+    );
+
+    setSelectedProduct(
+      null
+    );
+
+    setEditingProductId(
+      null
+    );
+
+    setProductOpenedFromProfile(
+      false
+    );
+  }
+
+
+  function renderBottomNavigation(
+    activeTab: MainTab
+  ) {
+    return (
+      <BottomNavigation
+        activeTab={activeTab}
+
+        onStorePress={() =>
+          openMainTab("store")
+        }
+
+        onChatPress={() =>
+          openMainTab("chat")
+        }
+
+        onUploadPress={() =>
+          openMainTab("upload")
+        }
+
+        onNotificationPress={() =>
+          openMainTab(
+            "notifications"
+          )
+        }
+
+        onProfilePress={() =>
+          openMainTab("profile")
+        }
+
+        unreadNotificationCount={
+          unreadNotificationCount
+        }
+      />
+    );
+  }
+
+
   // ANDROID_SYSTEM_BACK_NAV
   useEffect(() => {
     const subscription =
@@ -315,6 +488,16 @@ function StoreHome() {
         }
         if (selectedProduct) {
           setSelectedProduct(null);
+
+          if (
+            productOpenedFromProfile
+          ) {
+            setProductOpenedFromProfile(
+              false
+            );
+            setShowProfile(true);
+          }
+
           return true;
         }
         if (showChatInbox) {
@@ -340,7 +523,7 @@ function StoreHome() {
     return () => {
       subscription.remove();
     };
-  }, [selectedConversationId, editingProductId, selectedProduct, showChatInbox, showNotifications, showProfile, showUpload]);
+  }, [selectedConversationId, editingProductId, selectedProduct, productOpenedFromProfile, showChatInbox, showNotifications, showProfile, showUpload]);
 
 
   async function loadProducts(
@@ -463,11 +646,35 @@ function StoreHome() {
   }
   if (showProfile) {
     return (
-      <ProfileScreen
-        onBack={() =>
-          setShowProfile(false)
-        }
-      />
+      <View style={styles.screen}>
+        <View
+          style={
+            styles.mainTabContent
+          }
+        >
+          <ProfileScreen
+            products={products}
+            onBack={() =>
+              setShowProfile(false)
+            }
+            onOpenProduct={(
+              product
+            ) => {
+              setProductOpenedFromProfile(
+                true
+              );
+              setShowProfile(false);
+              setSelectedProduct(
+                product
+              );
+            }}
+          />
+        </View>
+
+        {renderBottomNavigation(
+          "profile"
+        )}
+      </View>
     );
   }
 
@@ -488,55 +695,79 @@ function StoreHome() {
 
   if (showChatInbox) {
     return (
-      <ChatInboxScreen
-        onBack={() =>
-          setShowChatInbox(false)
-        }
-        onOpenChat={(
-          conversationId
-        ) =>
-          setSelectedConversationId(
-            conversationId
-          )
-        }
-      />
+      <View style={styles.screen}>
+        <View
+          style={
+            styles.mainTabContent
+          }
+        >
+          <ChatInboxScreen
+            onBack={() =>
+              setShowChatInbox(false)
+            }
+            onOpenChat={(
+              conversationId
+            ) =>
+              setSelectedConversationId(
+                conversationId
+              )
+            }
+          />
+        </View>
+
+        {renderBottomNavigation(
+          "chat"
+        )}
+      </View>
     );
   }
 
   if (showNotifications) {
     return (
-      <NotificationScreen
-        onBack={() =>
-          setShowNotifications(
-            false
-          )
-        }
-        onUnreadChanged={
-          setUnreadNotificationCount
-        }
-        onOpenChat={(
-          conversationId
-        ) => {
-          setShowNotifications(
-            false
-          );
+      <View style={styles.screen}>
+        <View
+          style={
+            styles.mainTabContent
+          }
+        >
+          <NotificationScreen
+            onBack={() =>
+              setShowNotifications(
+                false
+              )
+            }
+            onUnreadChanged={
+              setUnreadNotificationCount
+            }
+            onOpenChat={(
+              conversationId
+            ) => {
+              setShowNotifications(
+                false
+              );
 
-          setSelectedConversationId(
-            conversationId
-          );
-        }}
-        onOpenProduct={(
-          productId
-        ) => {
-          setShowNotifications(
-            false
-          );
+              setSelectedConversationId(
+                conversationId
+              );
+            }}
+            onOpenProduct={(
+              productId
+            ) => {
+              setShowNotifications(
+                false
+              );
 
-          void openNotificationProduct(
-            productId
-          );
-        }}
-      />
+              void openNotificationProduct(
+                productId
+              );
+            }}
+          />
+        </View>
+
+        {renderBottomNavigation(
+          "notifications"
+        )}
+      </View>
     );
   }
 
@@ -544,9 +775,20 @@ function StoreHome() {
     return (
       <ProductDetailScreen
         product={selectedProduct}
-        onBack={() =>
-          setSelectedProduct(null)
-        }
+        onBack={() => {
+          setSelectedProduct(
+            null
+          );
+
+          if (
+            productOpenedFromProfile
+          ) {
+            setProductOpenedFromProfile(
+              false
+            );
+            setShowProfile(true);
+          }
+        }}
         onEditProduct={() => {
           setEditingProductId(
             selectedProduct.id
@@ -587,15 +829,27 @@ function StoreHome() {
 
   if (showUpload) {
     return (
-      <UploadProductScreen
-        onClose={() =>
-          setShowUpload(false)
-        }
-        onUploaded={() => {
-          setShowUpload(false);
-          loadProducts(false);
-        }}
-      />
+      <View style={styles.screen}>
+        <View
+          style={
+            styles.mainTabContent
+          }
+        >
+          <UploadProductScreen
+            onClose={() =>
+              setShowUpload(false)
+            }
+            onUploaded={() => {
+              setShowUpload(false);
+              loadProducts(false);
+            }}
+          />
+        </View>
+
+        {renderBottomNavigation(
+          "upload"
+        )}
+      </View>
     );
   }
 
@@ -739,23 +993,9 @@ function StoreHome() {
           )}
         </ScrollView>
 
-        <BottomNavigation
-          onChatPress={() =>
-            setShowChatInbox(true)
-          }
-          onNotificationPress={() =>
-            setShowNotifications(true)
-          }
-          unreadNotificationCount={
-            unreadNotificationCount
-          }
-          onUploadPress={() =>
-            setShowUpload(true)
-          }
-          onProfilePress={() =>
-            setShowProfile(true)
-          }
-        />
+        {renderBottomNavigation(
+          "store"
+        )}
       </View>
     </SafeAreaView>
   );
@@ -825,6 +1065,11 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: "#F8FAFC",
+  },
+
+  mainTabContent: {
+    flex: 1,
+    paddingBottom: 76,
   },
 
   scrollContent: {
