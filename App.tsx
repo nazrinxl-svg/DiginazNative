@@ -483,7 +483,7 @@ function ProductCard({
           product.title +
           "\n" +
           product.subject +
-          " · " +
+          " Â· " +
           product.level +
           "\n" +
           "Oleh " +
@@ -1568,11 +1568,7 @@ function StoreHome() {
           <View style={styles.header}>
             <View>
               <Text style={styles.brand}>
-                Diginaz Store
-              </Text>
-
-              <Text style={styles.brandSubtitle}>
-                Media pembelajaran dari guru untuk guru
+                Diginaz
               </Text>
             </View>
 

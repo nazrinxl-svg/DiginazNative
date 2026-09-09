@@ -670,9 +670,9 @@ const styles =
     },
 
     chatItem: {
-      minHeight: 88,
+      minHeight: 60,
       marginBottom: 0,
-      paddingVertical: 14,
+      paddingVertical: 6,
       paddingHorizontal: 0,
       borderRadius: 0,
       borderWidth: 0,
@@ -681,13 +681,13 @@ const styles =
       backgroundColor: "#FFFFFF",
       flexDirection: "row",
       alignItems: "center",
-      gap: 12,
+      gap: 10,
     },
 
     avatar: {
-      width: 48,
-      height: 48,
-      borderRadius: 24,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: "#EFF6FF",
@@ -696,7 +696,7 @@ const styles =
     avatarText: {
       fontFamily:
         "PlusJakartaSans_700Bold",
-      fontSize: 15,
+      fontSize: 13,
       color: "#2563EB",
     },
 
@@ -731,7 +731,7 @@ const styles =
       color: "#2563EB",
     },
     previewRow: {
-      marginTop: 4,
+      marginTop: 2,
       flexDirection: "row",
       alignItems: "center",
       gap: 5,
