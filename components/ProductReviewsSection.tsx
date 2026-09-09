@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useState,
 } from "react";
@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import {
   MessageCircle,
+  Send,
   Star,
 } from "lucide-react-native";
 
@@ -44,6 +45,80 @@ type Props = {
 };
 
 const STARS = [1, 2, 3, 4, 5];
+
+const DUMMY_REVIEWS: ReviewRow[] = [
+  {
+    id: "dummy-review-1",
+    product_key: "__dummy__",
+    reviewer_user_id: "dummy-user-1",
+    reviewer_name: "Mila Rahma",
+    rating: 5,
+    comment:
+      "Materinya rapi dan mudah dipahami. File ini bisa langsung dicetak ukuran A4?",
+    created_at: "2026-09-08T10:15:00.000Z",
+    updated_at: "2026-09-08T10:15:00.000Z",
+  },
+  {
+    id: "dummy-review-2",
+    product_key: "__dummy__",
+    reviewer_user_id: "dummy-user-2",
+    reviewer_name: "Andi Saputra",
+    rating: 5,
+    comment:
+      "Kalau untuk kelas 4 masih cocok digunakan, Kak?",
+    created_at: "2026-09-07T08:30:00.000Z",
+    updated_at: "2026-09-07T08:30:00.000Z",
+  },
+  {
+    id: "dummy-review-3",
+    product_key: "__dummy__",
+    reviewer_user_id: "dummy-user-3",
+    reviewer_name: "Rina Wulandari",
+    rating: 4,
+    comment:
+      "Ada versi yang bisa diedit juga? Desainnya bagus dan tidak terlalu ramai.",
+    created_at: "2026-09-06T13:45:00.000Z",
+    updated_at: "2026-09-06T13:45:00.000Z",
+  },
+  {
+    id: "dummy-review-4",
+    product_key: "__dummy__",
+    reviewer_user_id: "dummy-user-4",
+    reviewer_name: "Budi Pratama",
+    rating: 5,
+    comment:
+      "Gambarnya jelas dan petunjuk kegiatannya mudah diikuti anak.",
+    created_at: "2026-09-05T11:20:00.000Z",
+    updated_at: "2026-09-05T11:20:00.000Z",
+  },
+];
+
+function createDummyReplies(
+  creatorUserId: string
+): ReplyRow[] {
+  return [
+    {
+      id: "dummy-reply-1",
+      review_id: "dummy-review-1",
+      author_user_id: creatorUserId,
+      author_name: "Pembuat Produk",
+      body:
+        "Bisa, file sudah disiapkan dengan ukuran yang nyaman untuk dicetak.",
+      created_at: "2026-09-08T11:00:00.000Z",
+      updated_at: "2026-09-08T11:00:00.000Z",
+    },
+    {
+      id: "dummy-reply-2",
+      review_id: "dummy-review-2",
+      author_user_id: creatorUserId,
+      author_name: "Pembuat Produk",
+      body:
+        "Bisa. Tinggal disesuaikan kembali dengan materi yang sedang dipelajari.",
+      created_at: "2026-09-07T09:10:00.000Z",
+      updated_at: "2026-09-07T09:10:00.000Z",
+    },
+  ];
+}
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -223,6 +298,18 @@ export default function ProductReviewsSection({
         )
       : undefined;
 
+  const usingDummyReviews = true;
+
+  const visibleReviews =
+    usingDummyReviews
+      ? DUMMY_REVIEWS
+      : reviews;
+
+  const visibleReplies =
+    usingDummyReviews
+      ? createDummyReplies(creatorUserId)
+      : replies;
+
   async function submitReview() {
     if (
       !currentUserId ||
@@ -388,17 +475,21 @@ export default function ProductReviewsSection({
         </Text>
 
         <Text style={styles.reviewCount}>
-          {reviews.length > 0
-            ? `${reviews.length} ulasan`
-            : "Belum ada ulasan"}
+          {visibleReviews.length > 0
+            ? `${visibleReviews.length} komentar`
+            : "Belum ada komentar"}
         </Text>
       </View>
 
       {!isOwner ? (
         <View style={styles.form}>
-          <View style={styles.starPicker}>
-            {STARS.map(
-              (value) => (
+          <View style={styles.ratingRow}>
+            <Text style={styles.ratingLabel}>
+              Nilai produk
+            </Text>
+
+            <View style={styles.starPicker}>
+              {STARS.map((value) => (
                 <Pressable
                   key={value}
                   hitSlop={6}
@@ -407,7 +498,7 @@ export default function ProductReviewsSection({
                   }
                 >
                   <Star
-                    size={27}
+                    size={18}
                     color="#F3B63F"
                     fill={
                       value <= rating
@@ -417,47 +508,58 @@ export default function ProductReviewsSection({
                     strokeWidth={1.8}
                   />
                 </Pressable>
-              )
-            )}
+              ))}
+            </View>
           </View>
 
-          <TextInput
-            value={comment}
-            onChangeText={setComment}
-            placeholder="Tulis komentar atau ulasan produk..."
-            placeholderTextColor="#94A3B8"
-            multiline
-            maxLength={2000}
-            textAlignVertical="top"
-            style={styles.commentInput}
-          />
-
-          <Pressable
-            onPress={submitReview}
-            disabled={submittingReview}
-            style={[
-              styles.submitButton,
-              submittingReview &&
-                styles.buttonDisabled,
-            ]}
-          >
-            {submittingReview ? (
-              <ActivityIndicator
-                size="small"
-                color="#FFFFFF"
+          <View style={styles.composerRow}>
+            <View style={styles.composerIcon}>
+              <MessageCircle
+                size={16}
+                color="#64748B"
+                strokeWidth={1.8}
               />
-            ) : (
-              <Text
-                style={
-                  styles.submitButtonText
-                }
-              >
-                {ownReview
-                  ? "Perbarui Ulasan"
-                  : "Kirim Ulasan"}
-              </Text>
-            )}
-          </Pressable>
+            </View>
+
+            <TextInput
+              value={comment}
+              onChangeText={setComment}
+              placeholder="Tambahkan komentar..."
+              placeholderTextColor="#94A3B8"
+              multiline
+              maxLength={2000}
+              style={styles.commentInput}
+            />
+
+            <Pressable
+              onPress={submitReview}
+              disabled={submittingReview}
+              style={[
+                styles.sendButton,
+                submittingReview &&
+                  styles.sendButtonDisabled,
+              ]}
+            >
+              {submittingReview ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#FFFFFF"
+                />
+              ) : (
+                <Send
+                  size={16}
+                  color="#FFFFFF"
+                  strokeWidth={2}
+                />
+              )}
+            </Pressable>
+          </View>
+
+          {ownReview ? (
+            <Text style={styles.editingHint}>
+              Mengirim akan memperbarui ulasanmu.
+            </Text>
+          ) : null}
         </View>
       ) : null}
 
@@ -475,10 +577,10 @@ export default function ProductReviewsSection({
           />
 
           <Text style={styles.loadingText}>
-            Memuat ulasan...
+            Memuat komentar...
           </Text>
         </View>
-      ) : reviews.length === 0 ? (
+      ) : visibleReviews.length === 0 ? (
         <View style={styles.emptyState}>
           <MessageCircle
             size={22}
@@ -486,228 +588,223 @@ export default function ProductReviewsSection({
           />
 
           <Text style={styles.emptyText}>
-            Belum ada komentar atau ulasan.
+            Belum ada komentar.
           </Text>
         </View>
       ) : (
         <View style={styles.reviewList}>
-          {reviews.map(
-            (review) => {
-              const reviewReplies =
-                replies.filter(
-                  (reply) =>
-                    reply.review_id ===
-                    review.id
-                );
+          {visibleReviews.map((review) => {
+            const reviewReplies =
+              visibleReplies.filter(
+                (reply) =>
+                  reply.review_id ===
+                  review.id
+              );
 
-              const hasCreatorReply =
-                reviewReplies.some(
-                  (reply) =>
-                    reply.author_user_id ===
-                    creatorUserId
-                );
+            const hasCreatorReply =
+              reviewReplies.some(
+                (reply) =>
+                  reply.author_user_id ===
+                  creatorUserId
+              );
 
-              return (
-                <View
-                  key={review.id}
-                  style={styles.reviewItem}
-                >
-                  <View
-                    style={
-                      styles.reviewHeader
-                    }
-                  >
-                    <View style={styles.avatar}>
+            return (
+              <View
+                key={review.id}
+                style={styles.reviewItem}
+              >
+                <View style={styles.reviewRow}>
+                  <View style={styles.avatar}>
+                    <Text style={styles.avatarText}>
+                      {review.reviewer_name
+                        .trim()
+                        .charAt(0)
+                        .toUpperCase() || "P"}
+                    </Text>
+                  </View>
+
+                  <View style={styles.reviewContent}>
+                    <View style={styles.reviewTopLine}>
                       <Text
-                        style={
-                          styles.avatarText
-                        }
-                      >
-                        {review.reviewer_name
-                          .trim()
-                          .charAt(0)
-                          .toUpperCase() ||
-                          "P"}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={
-                        styles.reviewerInfo
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.reviewerName
-                        }
+                        style={styles.reviewerName}
                         numberOfLines={1}
                       >
-                        {
-                          review.reviewer_name
-                        }
+                        {review.reviewer_name}
                       </Text>
 
-                      <Text
-                        style={
-                          styles.reviewDate
-                        }
-                      >
+                      <View style={styles.reviewStars}>
+                        {STARS.map((value) => (
+                          <Star
+                            key={value}
+                            size={11}
+                            color="#F3B63F"
+                            fill={
+                              value <=
+                              review.rating
+                                ? "#F3B63F"
+                                : "transparent"
+                            }
+                            strokeWidth={1.8}
+                          />
+                        ))}
+                      </View>
+                    </View>
+
+                    <Text style={styles.reviewComment}>
+                      {review.comment}
+                    </Text>
+
+                    <View style={styles.reviewMetaRow}>
+                      <Text style={styles.reviewDate}>
                         {formatDate(
                           review.created_at
                         )}
                       </Text>
-                    </View>
-                  </View>
 
-                  <View
-                    style={
-                      styles.reviewStars
-                    }
-                  >
-                    {STARS.map(
-                      (value) => (
-                        <Star
-                          key={value}
-                          size={14}
-                          color="#F3B63F"
-                          fill={
-                            value <=
-                            review.rating
-                              ? "#F3B63F"
-                              : "transparent"
-                          }
-                          strokeWidth={1.7}
-                        />
-                      )
-                    )}
-                  </View>
-
-                  <Text
-                    style={styles.reviewComment}
-                  >
-                    {review.comment}
-                  </Text>
-
-                  {reviewReplies.map(
-                    (reply) => (
-                      <View
-                        key={reply.id}
-                        style={
-                          styles.creatorReply
-                        }
-                      >
-                        <View
-                          style={
-                            styles.creatorReplyTop
-                          }
-                        >
-                          <Text
-                            style={
-                              styles.creatorName
-                            }
-                          >
-                            {
-                              reply.author_name
-                            }
+                      {reviewReplies.length > 0 ||
+                      (isOwner &&
+                        !hasCreatorReply) ? (
+                        <>
+                          <Text style={styles.metaDot}>
+                            {"\u00B7"}
                           </Text>
 
+                          <Text
+                            style={
+                              styles.replyMetaText
+                            }
+                          >
+                            {reviewReplies.length > 0
+                              ? `${reviewReplies.length} balasan`
+                              : "Balas"}
+                          </Text>
+                        </>
+                      ) : null}
+                    </View>
+
+                    {reviewReplies.map((reply) => (
+                      <View
+                        key={reply.id}
+                        style={styles.creatorReply}
+                      >
+                        <View style={styles.replyAvatar}>
+                          <Text
+                            style={
+                              styles.replyAvatarText
+                            }
+                          >
+                            {reply.author_name
+                              .trim()
+                              .charAt(0)
+                              .toUpperCase() || "K"}
+                          </Text>
+                        </View>
+
+                        <View style={styles.replyContent}>
                           <View
                             style={
-                              styles.creatorBadge
+                              styles.creatorReplyTop
                             }
                           >
                             <Text
                               style={
-                                styles.creatorBadgeText
+                                styles.creatorName
                               }
                             >
-                              Kreator
+                              {reply.author_name}
                             </Text>
+
+                            <View
+                              style={
+                                styles.creatorBadge
+                              }
+                            >
+                              <Text
+                                style={
+                                  styles.creatorBadgeText
+                                }
+                              >
+                                Kreator
+                              </Text>
+                            </View>
                           </View>
-                        </View>
 
-                        <Text
-                          style={
-                            styles.replyBody
-                          }
-                        >
-                          {reply.body}
-                        </Text>
-                      </View>
-                    )
-                  )}
-
-                  {isOwner &&
-                  !hasCreatorReply ? (
-                    <View
-                      style={
-                        styles.replyForm
-                      }
-                    >
-                      <TextInput
-                        value={
-                          replyDrafts[
-                            review.id
-                          ] ?? ""
-                        }
-                        onChangeText={(
-                          value
-                        ) =>
-                          setReplyDrafts(
-                            (
-                              current
-                            ) => ({
-                              ...current,
-                              [review.id]:
-                                value,
-                            })
-                          )
-                        }
-                        placeholder="Balas komentar..."
-                        placeholderTextColor="#94A3B8"
-                        multiline
-                        maxLength={1000}
-                        style={
-                          styles.replyInput
-                        }
-                      />
-
-                      <Pressable
-                        onPress={() =>
-                          submitReply(
-                            review.id
-                          )
-                        }
-                        disabled={
-                          replyingReviewId ===
-                          review.id
-                        }
-                        style={
-                          styles.replyButton
-                        }
-                      >
-                        {replyingReviewId ===
-                        review.id ? (
-                          <ActivityIndicator
-                            size="small"
-                            color="#2563EB"
-                          />
-                        ) : (
-                          <Text
-                            style={
-                              styles.replyButtonText
-                            }
-                          >
-                            Balas
+                          <Text style={styles.replyBody}>
+                            {reply.body}
                           </Text>
-                        )}
-                      </Pressable>
-                    </View>
-                  ) : null}
+
+                          <Text style={styles.replyDate}>
+                            {formatDate(
+                              reply.created_at
+                            )}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+
+                    {isOwner &&
+                    !hasCreatorReply ? (
+                      <View style={styles.replyForm}>
+                        <TextInput
+                          value={
+                            replyDrafts[
+                              review.id
+                            ] ?? ""
+                          }
+                          onChangeText={(value) =>
+                            setReplyDrafts(
+                              (current) => ({
+                                ...current,
+                                [review.id]:
+                                  value,
+                              })
+                            )
+                          }
+                          placeholder="Balas komentar..."
+                          placeholderTextColor="#94A3B8"
+                          multiline
+                          maxLength={1000}
+                          style={styles.replyInput}
+                        />
+
+                        <Pressable
+                          onPress={() =>
+                            submitReply(
+                              review.id
+                            )
+                          }
+                          disabled={
+                            replyingReviewId ===
+                            review.id
+                          }
+                          style={[
+                            styles.replyButton,
+                            replyingReviewId ===
+                              review.id &&
+                              styles.sendButtonDisabled,
+                          ]}
+                        >
+                          {replyingReviewId ===
+                          review.id ? (
+                            <ActivityIndicator
+                              size="small"
+                              color="#FFFFFF"
+                            />
+                          ) : (
+                            <Send
+                              size={14}
+                              color="#FFFFFF"
+                              strokeWidth={2}
+                            />
+                          )}
+                        </Pressable>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
-              );
-            }
-          )}
+              </View>
+            );
+          })}
         </View>
       )}
     </View>
@@ -717,17 +814,17 @@ export default function ProductReviewsSection({
 const styles = StyleSheet.create({
   section: {
     marginHorizontal: 16,
-    marginTop: 18,
-    paddingTop: 14,
+    marginTop: 14,
+    paddingTop: 13,
     borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
+    borderTopColor: "#E5E7EB",
   },
 
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    marginBottom: 4,
   },
 
   sectionTitle: {
@@ -739,66 +836,96 @@ const styles = StyleSheet.create({
 
   reviewCount: {
     fontFamily:
-      "PlusJakartaSans_400Regular",
+      "PlusJakartaSans_500Medium",
     fontSize: 9.5,
     color: "#94A3B8",
   },
 
   form: {
-    marginTop: 14,
+    marginTop: 11,
+    marginBottom: 4,
+  },
+
+  ratingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+
+  ratingLabel: {
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 10,
+    color: "#64748B",
   },
 
   starPicker: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: 4,
+  },
+
+  composerRow: {
+    minHeight: 44,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingLeft: 5,
+    paddingRight: 5,
+    paddingVertical: 4,
+    borderRadius: 22,
+    backgroundColor: "#F1F5F9",
+  },
+
+  composerIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
   },
 
   commentInput: {
-    minHeight: 92,
-    marginTop: 12,
-    paddingHorizontal: 13,
-    paddingTop: 12,
-    paddingBottom: 12,
-    borderWidth: 1,
-    borderColor: "#DDE3EC",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    flex: 1,
+    minHeight: 36,
+    maxHeight: 94,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 11.5,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 16,
     color: "#0F172A",
   },
 
-  submitButton: {
-    alignSelf: "flex-start",
-    minWidth: 112,
-    height: 40,
-    marginTop: 10,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: "#2563EB",
+  sendButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: "#2563EB",
   },
 
-  submitButtonText: {
+  sendButtonDisabled: {
+    opacity: 0.5,
+  },
+
+  editingHint: {
+    marginTop: 5,
+    marginLeft: 10,
     fontFamily:
-      "PlusJakartaSans_600SemiBold",
-    fontSize: 10.5,
-    color: "#FFFFFF",
-  },
-
-  buttonDisabled: {
-    opacity: 0.55,
+      "PlusJakartaSans_400Regular",
+    fontSize: 8.5,
+    color: "#94A3B8",
   },
 
   errorText: {
-    marginTop: 10,
+    marginTop: 8,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 10,
+    fontSize: 9.5,
     color: "#DC2626",
   },
 
@@ -806,7 +933,7 @@ const styles = StyleSheet.create({
     minHeight: 90,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 7,
   },
 
   loadingText: {
@@ -831,80 +958,124 @@ const styles = StyleSheet.create({
   },
 
   reviewList: {
-    marginTop: 16,
+    marginTop: 7,
   },
 
   reviewItem: {
-    paddingVertical: 15,
-    borderTopWidth: 1,
-    borderTopColor: "#E8EDF3",
+    paddingVertical: 13,
+    borderBottomWidth: 1,
+    borderBottomColor: "#EEF1F5",
   },
 
-  reviewHeader: {
+  reviewRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
   },
 
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#EFF6FF",
+    backgroundColor: "#E2E8F0",
   },
 
   avatarText: {
     fontFamily:
       "PlusJakartaSans_700Bold",
     fontSize: 11,
-    color: "#2563EB",
+    color: "#475569",
   },
 
-  reviewerInfo: {
+  reviewContent: {
     flex: 1,
-    marginLeft: 9,
+    marginLeft: 10,
+  },
+
+  reviewTopLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 7,
   },
 
   reviewerName: {
     fontFamily:
-      "PlusJakartaSans_600SemiBold",
-    fontSize: 11,
-    color: "#0F172A",
-  },
-
-  reviewDate: {
-    marginTop: 2,
-    fontFamily:
-      "PlusJakartaSans_400Regular",
-    fontSize: 8.5,
-    color: "#94A3B8",
+      "PlusJakartaSans_500Medium",
+    fontSize: 10.5,
+    color: "#7C8594",
   },
 
   reviewStars: {
-    marginTop: 9,
     flexDirection: "row",
     alignItems: "center",
-    gap: 3,
+    gap: 1,
   },
 
   reviewComment: {
-    marginTop: 8,
+    marginTop: 3,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 11.5,
-    lineHeight: 18,
-    color: "#475569",
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#111827",
+  },
+
+  reviewMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 5,
+    gap: 6,
+  },
+
+  reviewDate: {
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 9,
+    color: "#9CA3AF",
+  },
+
+  metaDot: {
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 9,
+    color: "#CBD5E1",
+  },
+
+  replyMetaText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 9,
+    color: "#7C8594",
   },
 
   creatorReply: {
-    marginTop: 11,
-    marginLeft: 14,
-    padding: 11,
-    borderRadius: 10,
-    backgroundColor: "#F8FAFC",
-    borderLeftWidth: 3,
-    borderLeftColor: "#2563EB",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginTop: 12,
+    marginLeft: 2,
+  },
+
+  replyAvatar: {
+    width: 27,
+    height: 27,
+    borderRadius: 13.5,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#DBEAFE",
+  },
+
+  replyAvatarText: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 9,
+    color: "#2563EB",
+  },
+
+  replyContent: {
+    flex: 1,
+    marginLeft: 8,
   },
 
   creatorReplyTop: {
@@ -915,68 +1086,73 @@ const styles = StyleSheet.create({
 
   creatorName: {
     fontFamily:
-      "PlusJakartaSans_600SemiBold",
+      "PlusJakartaSans_500Medium",
     fontSize: 9.5,
-    color: "#0F172A",
+    color: "#7C8594",
   },
 
   creatorBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 1.5,
+    borderRadius: 999,
     backgroundColor: "#EFF6FF",
   },
 
   creatorBadgeText: {
     fontFamily:
       "PlusJakartaSans_600SemiBold",
-    fontSize: 7.5,
+    fontSize: 7,
     color: "#2563EB",
   },
 
   replyBody: {
-    marginTop: 5,
+    marginTop: 2,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 10.5,
-    lineHeight: 16,
-    color: "#475569",
+    fontSize: 14,
+    lineHeight: 20,
+    color: "#111827",
+  },
+
+  replyDate: {
+    marginTop: 4,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 8.5,
+    color: "#9CA3AF",
   },
 
   replyForm: {
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
     marginTop: 10,
+    paddingLeft: 11,
+    paddingRight: 4,
+    paddingVertical: 3,
+    borderRadius: 19,
+    backgroundColor: "#F1F5F9",
   },
 
   replyInput: {
-    minHeight: 64,
-    padding: 10,
-    borderWidth: 1,
-    borderColor: "#DDE3EC",
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    flex: 1,
+    minHeight: 32,
+    maxHeight: 76,
+    paddingVertical: 6,
+    paddingRight: 8,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 10.5,
-    lineHeight: 16,
+    fontSize: 10,
+    lineHeight: 15,
     color: "#0F172A",
   },
 
   replyButton: {
-    alignSelf: "flex-end",
-    minWidth: 64,
-    height: 32,
-    marginTop: 7,
-    paddingHorizontal: 12,
-    borderRadius: 9,
-    backgroundColor: "#EFF6FF",
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     alignItems: "center",
     justifyContent: "center",
-  },
-
-  replyButtonText: {
-    fontFamily:
-      "PlusJakartaSans_600SemiBold",
-    fontSize: 9.5,
-    color: "#2563EB",
+    backgroundColor: "#2563EB",
   },
 });

@@ -1665,8 +1665,8 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 14,
+    lineHeight: 20,
     color: "#475569",
   },
 
@@ -1684,7 +1684,7 @@ const styles = StyleSheet.create({
   infoLabel: {
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 11.5,
+    fontSize: 14,
     color: "#94A3B8",
   },
 
@@ -1693,7 +1693,7 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontFamily:
       "PlusJakartaSans_600SemiBold",
-    fontSize: 11.5,
+    fontSize: 14,
     color: "#334155",
   },
   ownerActions: {
