@@ -22,6 +22,9 @@ import {
   Heart,
   MessageCircle,
   Pencil,
+  UserRound,
+  UserPlus,
+  UserCheck,
 
   ShieldCheck,
   Trash2,
@@ -33,6 +36,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import CheckoutScreen from "./CheckoutScreen";
 import ReactNativeBlobUtil from "react-native-blob-util";
 import { supabase } from "../lib/supabase";
+import { pdfViewer } from "../lib/pdfViewer";
 
 import {
   createStoreProductPreviewSession,
@@ -72,6 +76,7 @@ type ProductDetailRow = {
   thumbnail_path: string | null;
   file_path: string | null;
   download_count: number | null;
+  updated_at: string | null;
 };
 
 type ProductPageRow = {
@@ -169,6 +174,32 @@ export default function ProductDetailScreen({
   const [detail, setDetail] =
     useState<ProductDetailRow | null>(null);
 
+  const [
+    pdfLocalPath,
+    setPdfLocalPath,
+  ] = useState<string | null>(null);
+
+  const [
+    pdfPageUrls,
+    setPdfPageUrls,
+  ] = useState<Array<string | null>>([]);
+
+  const [
+    pdfPageCount,
+    setPdfPageCount,
+  ] = useState(0);
+
+  const [
+    pdfViewerError,
+    setPdfViewerError,
+  ] = useState("");
+
+  const pdfRenderingRef =
+    useRef(new Set<number>());
+
+  const pdfRenderedPathsRef =
+    useRef(new Set<string>());
+
   const [loading, setLoading] =
     useState(true);
 
@@ -190,6 +221,16 @@ export default function ProductDetailScreen({
   const [
     deleteConfirmVisible,
     setDeleteConfirmVisible,
+  ] = useState(false);
+
+  const [
+    isFollowingCreator,
+    setIsFollowingCreator,
+  ] = useState(false);
+
+  const [
+    followLoading,
+    setFollowLoading,
   ] = useState(false);
 
   // DOWNLOAD_SUCCESS_DIGINAZ_MODAL_STATE
@@ -320,7 +361,7 @@ export default function ProductDetailScreen({
         } = await supabase
           .from("store_products")
           .select(
-            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,file_path,download_count"
+            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,file_path,download_count,updated_at"
           )
           .eq("id", product.id)
           .single();
@@ -405,8 +446,489 @@ export default function ProductDetailScreen({
     };
   }, [product.id, pagePreview]);
 
+  /*
+   * PDF_VIEWER_V1
+   * PDF tetap disimpan sebagai file PDF asli.
+   * Hanya salinan sementara yang dibaca PdfRenderer di perangkat.
+   */
+  useEffect(() => {
+    const storagePath =
+      detail?.file_path?.trim() ??
+      "";
+
+    if (
+      !storagePath
+        .toLowerCase()
+        .endsWith(".pdf")
+    ) {
+      setPdfLocalPath(null);
+      setPdfPageUrls([]);
+      setPdfPageCount(0);
+      setPdfViewerError("");
+      return;
+    }
+
+    let active = true;
+    let temporaryPdfPath:
+      string | null = null;
+
+    pdfRenderingRef.current.clear();
+    pdfRenderedPathsRef.current.clear();
+
+    setPdfLocalPath(null);
+    setPdfPageUrls([]);
+    setPdfPageCount(0);
+    setPdfViewerError("");
+    setFirstImageSettledUrl(null);
+
+    async function preparePdf() {
+      try {
+        if (
+          Platform.OS !== "android" ||
+          !pdfViewer.available
+        ) {
+          throw new Error(
+            "Viewer PDF belum tersedia pada perangkat ini."
+          );
+        }
+
+        const pdfCacheDirectory =
+          `${ReactNativeBlobUtil.fs.dirs.CacheDir}/` +
+          "diginaz-pdf-cache";
+
+        const storageFileName =
+          storagePath
+            .split("/")
+            .pop()
+            ?.trim() ||
+          "product.pdf";
+
+        const pdfCacheVersion =
+          detail?.updated_at
+            ?.trim()
+            .replace(
+              /[^a-zA-Z0-9]/g,
+              ""
+            ) ||
+          "legacy";
+
+        const cacheFileName =
+          `${product.id}-${pdfCacheVersion}-${storageFileName}`
+            .replace(
+              /[^a-zA-Z0-9._-]/g,
+              "_"
+            );
+
+        const cachedPdfPath =
+          `${pdfCacheDirectory}/${cacheFileName}`;
+
+        let cachedPdfReady = false;
+
+        try {
+          const cacheExists =
+            await ReactNativeBlobUtil.fs
+              .exists(
+                cachedPdfPath
+              );
+
+          if (cacheExists) {
+            const cacheStat =
+              await ReactNativeBlobUtil.fs
+                .stat(
+                  cachedPdfPath
+                );
+
+            cachedPdfReady =
+              Number(
+                cacheStat.size ?? 0
+              ) > 0;
+          }
+        } catch {
+          cachedPdfReady = false;
+        }
+
+        if (!cachedPdfReady) {
+          const cacheDirectoryExists =
+            await ReactNativeBlobUtil.fs
+              .exists(
+                pdfCacheDirectory
+              );
+
+          if (!cacheDirectoryExists) {
+            await ReactNativeBlobUtil.fs
+              .mkdir(
+                pdfCacheDirectory
+              );
+          }
+
+          const {
+            data: signed,
+            error: signedError,
+          } = await supabase.storage
+            .from(
+              "store-product-files"
+            )
+            .createSignedUrl(
+              storagePath,
+              300
+            );
+
+          if (signedError) {
+            throw signedError;
+          }
+
+          if (!signed?.signedUrl) {
+            throw new Error(
+              "File PDF belum dapat dibuka."
+            );
+          }
+
+          await ReactNativeBlobUtil
+            .config({
+              path:
+                cachedPdfPath,
+            })
+            .fetch(
+              "GET",
+              signed.signedUrl
+            );
+        }
+
+        temporaryPdfPath =
+          cachedPdfPath;
+
+        if (!active) {
+          return;
+        }
+
+        const pageCount =
+          await pdfViewer.getPageCount(
+            temporaryPdfPath
+          );
+
+        if (pageCount <= 0) {
+          throw new Error(
+            "PDF tidak memiliki halaman."
+          );
+        }
+
+        const firstPage =
+          await pdfViewer.renderPage(
+            temporaryPdfPath,
+            0,
+            1000
+          );
+
+        if (!active) {
+          return;
+        }
+
+        pdfRenderedPathsRef.current.add(
+          firstPage.uri
+        );
+
+        setPdfLocalPath(
+          temporaryPdfPath
+        );
+
+        setPdfPageCount(
+          pageCount
+        );
+
+        setPdfPageUrls([
+          firstPage.uri,
+          ...Array.from(
+            {
+              length:
+                Math.max(
+                  pageCount - 1,
+                  0
+                ),
+            },
+            () => null
+          ),
+        ]);
+      } catch (error) {
+        if (!active) return;
+
+        console.error(
+          "PDF viewer gagal:",
+          error
+        );
+
+        setPdfViewerError(
+          error instanceof Error
+            ? error.message
+            : "Isi PDF belum dapat ditampilkan."
+        );
+      }
+    }
+
+    void preparePdf();
+
+    return () => {
+      active = false;
+
+      pdfRenderingRef.current.clear();
+      pdfRenderedPathsRef.current.clear();
+
+      /*
+       * PDF dan hasil render sengaja dipertahankan
+       * di CacheDir agar produk yang sama dapat
+       * dibuka kembali tanpa download/render ulang.
+       */
+    };
+  }, [
+    detail?.file_path,
+    detail?.updated_at,
+    product.id,
+  ]);
+
+
+  /*
+   * Render halaman aktif bila belum ada.
+   * Setelah halaman aktif siap, render satu halaman berikutnya.
+   */
+  useEffect(() => {
+    if (
+      !pdfLocalPath ||
+      pdfPageCount <= 0 ||
+      !pdfViewer.available
+    ) {
+      return;
+    }
+
+    const currentReady =
+      Boolean(
+        pdfPageUrls[
+          activeProductSlide
+        ]
+      );
+
+    const targetIndex =
+      currentReady
+        ? activeProductSlide + 1
+        : activeProductSlide;
+
+    if (
+      targetIndex < 0 ||
+      targetIndex >= pdfPageCount ||
+      pdfPageUrls[targetIndex] ||
+      pdfRenderingRef.current.has(
+        targetIndex
+      )
+    ) {
+      return;
+    }
+
+    let active = true;
+
+    pdfRenderingRef.current.add(
+      targetIndex
+    );
+
+    void pdfViewer
+      .renderPage(
+        pdfLocalPath,
+        targetIndex,
+        1000
+      )
+      .then(rendered => {
+        if (!active) return;
+
+        pdfRenderedPathsRef.current.add(
+          rendered.uri
+        );
+
+        setPdfPageUrls(
+          current => {
+            const next =
+              [...current];
+
+            next[targetIndex] =
+              rendered.uri;
+
+            return next;
+          }
+        );
+      })
+      .catch(error => {
+        if (!active) return;
+
+        console.warn(
+          "Halaman PDF gagal dirender:",
+          error
+        );
+      })
+      .finally(() => {
+        pdfRenderingRef.current.delete(
+          targetIndex
+        );
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [
+    pdfLocalPath,
+    pdfPageCount,
+    pdfPageUrls,
+    activeProductSlide,
+  ]);
+
+
   const isOwner =
     currentUserId === product.creatorUserId;
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCreatorFollow() {
+      if (
+        !currentUserId ||
+        isOwner
+      ) {
+        if (active) {
+          setIsFollowingCreator(false);
+        }
+
+        return;
+      }
+
+      try {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from(
+            "app_profile_follows"
+          )
+          .select(
+            "following_user_id"
+          )
+          .eq(
+            "follower_user_id",
+            currentUserId
+          )
+          .eq(
+            "following_user_id",
+            product.creatorUserId
+          )
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setIsFollowingCreator(
+          Boolean(data)
+        );
+      } catch (error) {
+        console.warn(
+          "Status follow creator gagal dimuat:",
+          error
+        );
+      }
+    }
+
+    void loadCreatorFollow();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    currentUserId,
+    isOwner,
+    product.creatorUserId,
+  ]);
+
+
+  async function handleCreatorFollowToggle() {
+    if (
+      !currentUserId ||
+      isOwner ||
+      followLoading
+    ) {
+      return;
+    }
+
+    const previous =
+      isFollowingCreator;
+
+    const next =
+      !previous;
+
+    setFollowLoading(true);
+    setIsFollowingCreator(next);
+
+    try {
+      if (next) {
+        const { error } =
+          await supabase
+            .from(
+              "app_profile_follows"
+            )
+            .insert({
+              follower_user_id:
+                currentUserId,
+              following_user_id:
+                product.creatorUserId,
+            });
+
+        if (
+          error &&
+          error.code !== "23505"
+        ) {
+          throw error;
+        }
+
+        if (
+          error?.code === "23505"
+        ) {
+          setIsFollowingCreator(true);
+        }
+      } else {
+        const { error } =
+          await supabase
+            .from(
+              "app_profile_follows"
+            )
+            .delete()
+            .eq(
+              "follower_user_id",
+              currentUserId
+            )
+            .eq(
+              "following_user_id",
+              product.creatorUserId
+            );
+
+        if (error) {
+          throw error;
+        }
+      }
+    } catch (error) {
+      setIsFollowingCreator(
+        previous
+      );
+
+      console.error(
+        "Follow creator gagal:",
+        error
+      );
+
+      Alert.alert(
+        "Belum dapat diperbarui",
+        "Status follow belum dapat diperbarui."
+      );
+    } finally {
+      setFollowLoading(false);
+    }
+  }
 
   // TEMPORARY_CHECKOUT_TEST
   // Hanya untuk menguji checkout produk berbayar
@@ -1494,17 +2016,28 @@ export default function ProductDetailScreen({
    * Cover 1:1 hanya untuk kartu Store.
    * Detail Produk hanya memakai halaman produk.
    */
-  const productSlides =
-    productPageUrls;
-
-  // PAGE_COUNT_EARLY_COUNTER
-  // Total halaman berasal dari metadata Store, bukan dari jumlah URL
-  // yang sudah selesai disiapkan.
-  const productPageCount =
-    Math.max(
-      Number(product.pageCount ?? 0),
-      productSlides.length
+  const isPdfProduct =
+    Boolean(
+      detail?.file_path
+        ?.trim()
+        .toLowerCase()
+        .endsWith(".pdf")
     );
+
+  const productSlides =
+    isPdfProduct
+      ? pdfPageUrls
+      : productPageUrls;
+
+  const productPageCount =
+    isPdfProduct
+      ? pdfPageCount
+      : Math.max(
+          Number(
+            product.pageCount ?? 0
+          ),
+          productSlides.length
+        );
 
   const productGalleryWidth =
     Math.max(
@@ -1548,7 +2081,13 @@ export default function ProductDetailScreen({
           Detail Produk
         </Text>
 
-        {isOwner ? (
+        {!currentUserId ? (
+          <View
+            style={
+              styles.headerOwnerActions
+            }
+          />
+        ) : isOwner ? (
           <View
             style={
               styles.headerOwnerActions
@@ -1595,7 +2134,69 @@ export default function ProductDetailScreen({
               )}
             </Pressable>
           </View>
-        ) : null}
+        ) : (
+          <View
+            style={
+              styles.headerVisitorActions
+            }
+          >
+            <Pressable
+              style={
+                styles.headerVisitorIconButton
+              }
+              onPress={() =>
+                onOpenCreatorProfile(
+                  product.creatorUserId
+                )
+              }
+              hitSlop={6}
+              accessibilityLabel="Buka profil pembuat"
+            >
+              <UserRound
+                size={18}
+                color="#334155"
+                strokeWidth={1.8}
+              />
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.headerVisitorFollowButton,
+                isFollowingCreator &&
+                  styles.headerVisitorFollowButtonActive,
+              ]}
+              onPress={() =>
+                void handleCreatorFollowToggle()
+              }
+              disabled={followLoading}
+              hitSlop={6}
+              accessibilityLabel={
+                isFollowingCreator
+                  ? "Berhenti mengikuti"
+                  : "Ikuti pembuat"
+              }
+            >
+              {followLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color="#2563EB"
+                />
+              ) : isFollowingCreator ? (
+                <UserCheck
+                  size={18}
+                  color="#2563EB"
+                  strokeWidth={1.9}
+                />
+              ) : (
+                <UserPlus
+                  size={18}
+                  color="#2563EB"
+                  strokeWidth={1.9}
+                />
+              )}
+            </Pressable>
+          </View>
+        )}
 
 
       </View>
@@ -1624,22 +2225,141 @@ export default function ProductDetailScreen({
           contentContainerStyle={
             styles.content
           }
+          scrollEventThrottle={
+            isPdfProduct
+              ? 16
+              : undefined
+          }
+          onScroll={
+            isPdfProduct
+              ? event => {
+                  if (productPageCount <= 0) {
+                    return;
+                  }
+
+                  const estimatedPageHeight =
+                    productGalleryWidth *
+                      (297 / 210) +
+                    8;
+
+                  const offsetY =
+                    event.nativeEvent
+                      .contentOffset.y;
+
+                  const nextIndex =
+                    Math.floor(
+                      (
+                        offsetY +
+                        estimatedPageHeight * 0.35
+                      ) /
+                        estimatedPageHeight
+                    );
+
+                  setActiveProductSlide(
+                    Math.max(
+                      0,
+                      Math.min(
+                        nextIndex,
+                        productPageCount - 1
+                      )
+                    )
+                  );
+                }
+              : undefined
+          }
         >
           <View
-            style={styles.productGallery}
+            style={[
+              styles.productGallery,
+              isPdfProduct &&
+                styles.pdfProductGallery,
+            ]}
           >
-            {productSlides.length > 0 ? (
+            {isPdfProduct ? (
+              productSlides.length > 0 ? (
+                <View
+                  style={
+                    styles.pdfDocument
+                  }
+                >
+                  {productSlides.map(
+                    (imageUrl, index) => (
+                      <View
+                        key={`${product.id}-pdf-page-${index}`}
+                        style={
+                          styles.pdfPage
+                        }
+                      >
+                        {imageUrl ? (
+                          <Image
+                            source={{
+                              uri: imageUrl,
+                            }}
+                            style={
+                              styles.pdfPageImage
+                            }
+                            resizeMode="contain"
+                          />
+                        ) : (
+                          <View
+                            style={
+                              styles.pdfPageLoading
+                            }
+                          >
+                            <ActivityIndicator
+                              size="small"
+                              color="#2563EB"
+                            />
+                          </View>
+                        )}
+
+                        <View
+                          style={
+                            styles.pdfPageNumber
+                          }
+                        >
+                          <Text
+                            style={
+                              styles.pdfPageNumberText
+                            }
+                          >
+                            {index + 1}
+                            {" / "}
+                            {productPageCount}
+                          </Text>
+                        </View>
+                      </View>
+                    ))
+                  }
+                </View>
+              ) : (
+                <View
+                  style={
+                    styles.pdfInitialLoading
+                  }
+                >
+                  {pdfViewerError ? (
+                    <Text
+                      style={styles.errorText}
+                    >
+                      {pdfViewerError}
+                    </Text>
+                  ) : (
+                    <ActivityIndicator
+                      size="small"
+                      color="#2563EB"
+                    />
+                  )}
+                </View>
+              )
+            ) : productSlides.length > 0 ? (
               <ScrollView
                 horizontal
                 pagingEnabled
                 nestedScrollEnabled
-                showsHorizontalScrollIndicator={
-                  false
-                }
+                showsHorizontalScrollIndicator={false}
                 decelerationRate="fast"
-                onMomentumScrollEnd={(
-                  event
-                ) => {
+                onMomentumScrollEnd={event => {
                   const nextIndex =
                     Math.round(
                       event.nativeEvent
@@ -1652,18 +2372,14 @@ export default function ProductDetailScreen({
                       0,
                       Math.min(
                         nextIndex,
-                        productSlides.length -
-                          1
+                        productSlides.length - 1
                       )
                     )
                   );
                 }}
               >
                 {productSlides.map(
-                  (
-                    imageUrl,
-                    index
-                  ) => (
+                  (imageUrl, index) => (
                     <View
                       key={`${product.id}-page-${index}`}
                       style={[
@@ -1675,42 +2391,69 @@ export default function ProductDetailScreen({
                       ]}
                     >
                       {imageUrl && (
-                        /* GALLERY_LAZY_NEXT_PAGE */
                         index <= activeProductSlide ||
                         (
-                          firstImageSettledUrl === productSlides[0] &&
-                          index === activeProductSlide + 1
+                          firstImageSettledUrl ===
+                            productSlides[0] &&
+                          index ===
+                            activeProductSlide + 1
                         )
                       ) ? (
                         <Image
-                          source={{ uri: imageUrl }}
-                          style={styles.thumbnailImage}
+                          source={{
+                            uri: imageUrl,
+                          }}
+                          style={
+                            styles.thumbnailImage
+                          }
                           resizeMode="contain"
                           onLoadStart={() => {
-                            imageStartedRef.current.set(imageUrl, Date.now());
-                            logA4("IMAGE_START", product.id, { page: index + 1 });
+                            imageStartedRef.current.set(
+                              imageUrl,
+                              Date.now()
+                            );
+
+                            logA4(
+                              "IMAGE_START",
+                              product.id,
+                              {
+                                page: index + 1,
+                              }
+                            );
                           }}
                           onLoad={() => {
-                            const started = imageStartedRef.current.get(imageUrl);
-                            logA4("IMAGE_LOADED", product.id, {
-                              page: index + 1,
-                              imageMs: started === undefined ? -1 : Date.now() - started,
-                              sinceMountMs: Date.now() - openedAtRef.current,
-                            });
-                            if (index === 0) setFirstImageSettledUrl(imageUrl);
-                          }}
-                          onError={() => {
-                            logA4("IMAGE_ERROR", product.id, {
-                              page: index + 1,
-                              sinceMountMs: Date.now() - openedAtRef.current,
-                            });
-                            if (index === 0) setFirstImageSettledUrl(imageUrl);
+                            const started =
+                              imageStartedRef.current.get(
+                                imageUrl
+                              );
+
+                            logA4(
+                              "IMAGE_LOADED",
+                              product.id,
+                              {
+                                page: index + 1,
+                                imageMs:
+                                  started === undefined
+                                    ? -1
+                                    : Date.now() -
+                                      started,
+                                sinceMountMs:
+                                  Date.now() -
+                                  openedAtRef.current,
+                              }
+                            );
+
+                            if (index === 0) {
+                              setFirstImageSettledUrl(
+                                imageUrl
+                              );
+                            }
                           }}
                         />
                       ) : null}
                     </View>
-                  )
-                )}
+                  ))
+                }
               </ScrollView>
             ) : (
               <View
@@ -1725,40 +2468,42 @@ export default function ProductDetailScreen({
                 <ActivityIndicator
                   size="small"
                   color="#2563EB"
-                  accessibilityLabel="Menyiapkan halaman produk"
                 />
               </View>
             )}
 
-            <View
-              style={styles.typeBadge}
-            >
-              <Text
-                style={
-                  styles.typeBadgeText
-                }
-              >
-                {product.type}
-              </Text>
-            </View>
-
-            {productPageCount > 1 ? (
-              <View
-                style={
-                  styles.slideCounter
-                }
-              >
-                <Text
-                  style={
-                    styles.slideCounterText
-                  }
+            {!isPdfProduct ? (
+              <>
+                <View
+                  style={styles.typeBadge}
                 >
-                  {activeProductSlide +
-                    1}
-                  {" / "}
-                  {productPageCount}
-                </Text>
-              </View>
+                  <Text
+                    style={
+                      styles.typeBadgeText
+                    }
+                  >
+                    {product.type}
+                  </Text>
+                </View>
+
+                {productPageCount > 1 ? (
+                  <View
+                    style={
+                      styles.slideCounter
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.slideCounterText
+                      }
+                    >
+                      {activeProductSlide + 1}
+                      {" / "}
+                      {productPageCount}
+                    </Text>
+                  </View>
+                ) : null}
+              </>
             ) : null}
           </View>
 
@@ -2499,6 +3244,37 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
+  headerVisitorActions: {
+    marginLeft: "auto",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+
+  headerVisitorIconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  headerVisitorFollowButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EFF6FF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  headerVisitorFollowButtonActive: {
+    backgroundColor: "#DBEAFE",
+  },
+
   ownerProductActionsHidden: {
     display: "none",
   },
@@ -2632,6 +3408,68 @@ const styles = StyleSheet.create({
 
   content: {
     paddingBottom: 40,
+  },
+
+  pdfProductGallery: {
+    overflow: "visible",
+    backgroundColor: "#E2E8F0",
+  },
+
+  pdfDocument: {
+    width: "100%",
+    gap: 8,
+    paddingBottom: 8,
+    backgroundColor: "#E2E8F0",
+  },
+
+  pdfPage: {
+    width: "100%",
+    aspectRatio: 210 / 297,
+    position: "relative",
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  pdfPageImage: {
+    width: "100%",
+    height: "100%",
+  },
+
+  pdfPageLoading: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  pdfInitialLoading: {
+    width: "100%",
+    aspectRatio: 210 / 297,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  pdfPageNumber: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+    minWidth: 42,
+    height: 24,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor:
+      "rgba(15, 23, 42, 0.66)",
+  },
+
+  pdfPageNumberText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 9,
+    color: "#FFFFFF",
   },
 
   productGallery: {

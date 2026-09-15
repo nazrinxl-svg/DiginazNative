@@ -903,6 +903,19 @@ function StoreHome() {
     );
 
   const [
+    homeAvatarUrl,
+    setHomeAvatarUrl,
+  ] = useState("");
+
+  const [
+    homeProfileName,
+    setHomeProfileName,
+  ] = useState("");
+
+  const profileOpenPreparingRef =
+    useRef(false);
+
+  const [
     productActionState,
     setProductActionState,
   ] =
@@ -946,6 +959,71 @@ function StoreHome() {
 
   const [showProfile, setShowProfile] =
     useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadHomeAvatar() {
+      if (
+        !storeUserId ||
+        showProfile
+      ) {
+        return;
+      }
+
+      try {
+        const {
+          data,
+          error,
+        } = await supabase
+          .from("app_profiles")
+          .select("full_name,avatar_url")
+          .eq(
+            "auth_user_id",
+            storeUserId
+          )
+          .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setHomeAvatarUrl(
+          String(
+            data?.avatar_url ?? ""
+          ).trim()
+        );
+
+        setHomeProfileName(
+          String(
+            data?.full_name ?? ""
+          ).trim()
+        );
+      } catch (error) {
+        console.warn(
+          "Foto profil Home gagal dimuat:",
+          error
+        );
+
+        if (active) {
+          setHomeAvatarUrl("");
+        }
+      }
+    }
+
+    void loadHomeAvatar();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    storeUserId,
+    showProfile,
+  ]);
 
   const [
     selectedProfileUserId,
@@ -1318,6 +1396,134 @@ function StoreHome() {
 
   const [selectedConversationId, setSelectedConversationId] =
     useState<string | null>(null);
+  // PROFILE_AVATAR_PREFETCH_V4B
+  useEffect(() => {
+    if (!homeAvatarUrl) {
+      return;
+    }
+
+    void Image.prefetch(
+      homeAvatarUrl
+    ).catch(() => undefined);
+  }, [homeAvatarUrl]);
+
+
+  async function openProfileReady() {
+    if (
+      profileOpenPreparingRef.current
+    ) {
+      return;
+    }
+
+    profileOpenPreparingRef.current =
+      true;
+
+    try {
+      let preparedName =
+        homeProfileName.trim();
+
+      let preparedAvatar =
+        homeAvatarUrl.trim();
+
+      /*
+       * Kalau salah satunya belum siap,
+       * baca app_profiles sebelum pindah halaman.
+       */
+      if (
+        !preparedName ||
+        !preparedAvatar
+      ) {
+        let userId =
+          storeUserId;
+
+        if (!userId) {
+          const {
+            data: sessionData,
+          } =
+            await supabase.auth
+              .getSession();
+
+          userId =
+            sessionData.session
+              ?.user.id ?? null;
+        }
+
+        if (userId) {
+          const {
+            data,
+            error,
+          } =
+            await supabase
+              .from(
+                "app_profiles"
+              )
+              .select(
+                "full_name,avatar_url"
+              )
+              .eq(
+                "auth_user_id",
+                userId
+              )
+              .maybeSingle();
+
+          if (error) {
+            throw error;
+          }
+
+          preparedName =
+            String(
+              data?.full_name ?? ""
+            ).trim();
+
+          preparedAvatar =
+            String(
+              data?.avatar_url ?? ""
+            ).trim();
+
+          setHomeProfileName(
+            preparedName
+          );
+
+          setHomeAvatarUrl(
+            preparedAvatar
+          );
+        }
+      }
+
+      /*
+       * Tunggu bitmap avatar benar-benar masuk cache.
+       */
+      if (preparedAvatar) {
+        try {
+          await Image.prefetch(
+            preparedAvatar
+          );
+        }
+        catch {}
+      }
+
+      openMainTab(
+        "profile"
+      );
+    }
+    catch (error) {
+      console.warn(
+        "Persiapan Profil gagal:",
+        error
+      );
+
+      openMainTab(
+        "profile"
+      );
+    }
+    finally {
+      profileOpenPreparingRef.current =
+        false;
+    }
+  }
+
+
+
 
 
   function openMainTab(
@@ -1395,9 +1601,9 @@ function StoreHome() {
           )
         }
 
-        onProfilePress={() =>
-          openMainTab("profile")
-        }
+        onProfilePress={() => {
+          void openProfileReady();
+        }}
 
         unreadNotificationCount={
           unreadNotificationCount
@@ -1622,6 +1828,12 @@ function StoreHome() {
           }
         >
           <ProfileScreen
+            initialName={
+              homeProfileName
+            }
+            initialAvatarUrl={
+              homeAvatarUrl
+            }
             products={products}
             onBack={() =>
               setShowProfile(false)
@@ -1936,32 +2148,31 @@ function StoreHome() {
             </View>
 
             <View style={styles.headerActions}>
-              <Pressable style={styles.iconButton}
-                onPress={() =>
-                  setShowNotifications(
-                    true
-                  )
-                }>
-                <Bell
-                  size={19}
-                  color="#334155"
-                  strokeWidth={1.8}
-                />
-
-                {unreadNotificationCount >
-                0 ? (
-                  <View
+              <Pressable
+                style={styles.avatarButton}
+                onPress={() => {
+                  void openProfileReady();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Buka profil"
+              >
+                {homeAvatarUrl ? (
+                  <Image
+                    source={{
+                      uri: homeAvatarUrl,
+                    }}
                     style={
-                      styles.notificationDot
+                      styles.headerAvatarImage
                     }
+                    resizeMode="cover"
                   />
-                ) : null}
-              </Pressable>
-
-              <Pressable style={styles.avatarButton}>
-                <Text style={styles.avatarText}>
-                  N
-                </Text>
+                ) : (
+                  <UserRound
+                    size={20}
+                    color="#2563EB"
+                    strokeWidth={1.8}
+                  />
+                )}
               </Pressable>
             </View>
           </View>
@@ -2222,6 +2433,12 @@ const styles = StyleSheet.create({
     backgroundColor: "#DBEAFE",
     alignItems: "center",
     justifyContent: "center",
+  },
+
+  headerAvatarImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 19,
   },
 
   avatarText: {

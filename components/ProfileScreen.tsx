@@ -67,6 +67,9 @@ type ProfileRow = {
 type Props = {
   onBack: () => void;
 
+  initialName?: string;
+  initialAvatarUrl?: string;
+
   products:
     StoreProductCardItem[];
 
@@ -136,6 +139,8 @@ function getUsername(
 
 export default function ProfileScreen({
   onBack,
+  initialName = "",
+  initialAvatarUrl = "",
   products,
   onOpenProduct,
 }: Props) {
@@ -143,7 +148,12 @@ export default function ProfileScreen({
   const [
     loading,
     setLoading,
-  ] = useState(true);
+  ] = useState(
+    !(
+      initialName.trim() ||
+      initialAvatarUrl.trim()
+    )
+  );
 
   const [
     logoutLoading,
@@ -166,7 +176,8 @@ export default function ProfileScreen({
     name,
     setName,
   ] = useState(
-    "Pengguna Diginaz"
+    initialName.trim() ||
+      "Pengguna Diginaz"
   );
 
   const [
@@ -194,7 +205,9 @@ export default function ProfileScreen({
   const [
     avatarUrl,
     setAvatarUrl,
-  ] = useState("");
+  ] = useState(
+    initialAvatarUrl.trim()
+  );
 
   const [
     showSettingsMenu,
@@ -524,15 +537,9 @@ export default function ProfileScreen({
           user.id
         );
 
-        setName(
-          fallbackName
-        );
-
         setEmail(
           fallbackEmail
         );
-
-        setLoading(false);
 
 
         let profileRow:
@@ -642,9 +649,11 @@ export default function ProfileScreen({
         setAvatarUrl(
           profileRow
             ?.avatar_url
-            ?.trim() ??
-            ""
+            ?.trim() ||
+            initialAvatarUrl.trim()
         );
+
+        setLoading(false);
 
       } catch (error) {
 
