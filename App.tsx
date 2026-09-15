@@ -1,4 +1,5 @@
-﻿import { useUnreadNotificationCount } from "./lib/useUnreadNotificationCount";
+import { formatEngagementCount, getDummyCardEngagement } from "./lib/storeEngagement";
+import { useUnreadNotificationCount } from "./lib/useUnreadNotificationCount";
 import React, { useEffect, useRef, useState } from "react";
 import {
   BackHandler,
@@ -493,14 +494,21 @@ function ProductCard({
           }
         >
           <View
-            style={
-              styles.cardActionIcons
-            }
+            style={[
+              styles.cardActionIcons,
+              {
+                width: "100%",
+              },
+            ]}
           >
             <Pressable
-              style={
-                styles.cardIconButton
-              }
+              style={[
+                styles.cardIconButton,
+                {
+                  flex: 1,
+                  paddingVertical: 2,
+                },
+              ]}
               onPress={event => {
                 event.stopPropagation();
 
@@ -517,7 +525,7 @@ function ProductCard({
                 />
               ) : (
                 <Heart
-                  size={18}
+                  size={16}
                   color={
                     isLoved
                       ? "#E11D48"
@@ -531,13 +539,32 @@ function ProductCard({
                   strokeWidth={1.8}
                 />
               )}
+              <Text
+                style={{
+                  marginTop: 0,
+                  fontSize: 8,
+                  lineHeight: 10,
+                  fontWeight: "500",
+                  color: "#94A3B8",
+                }}
+              >
+                {formatEngagementCount(
+                  getDummyCardEngagement(
+                    product.id
+                  ).love
+                )}
+              </Text>
             </Pressable>
 
 
             <Pressable
-              style={
-                styles.cardIconButton
-              }
+              style={[
+                styles.cardIconButton,
+                {
+                  flex: 1,
+                  paddingVertical: 2,
+                },
+              ]}
               onPress={event => {
                 event.stopPropagation();
                 void handleSave();
@@ -551,7 +578,7 @@ function ProductCard({
                 />
               ) : (
                 <Bookmark
-                  size={18}
+                  size={16}
                   color={
                     isSaved
                       ? "#2563EB"
@@ -565,11 +592,26 @@ function ProductCard({
                   strokeWidth={1.8}
                 />
               )}
+              <Text
+                style={{
+                  marginTop: 0,
+                  fontSize: 8,
+                  lineHeight: 10,
+                  fontWeight: "500",
+                  color: "#94A3B8",
+                }}
+              >
+                {formatEngagementCount(
+                  getDummyCardEngagement(
+                    product.id
+                  ).save
+                )}
+              </Text>
             </Pressable>
 
 
             <Pressable
-              style={styles.cardIconButton}
+              style={[styles.cardIconButton, { flex: 1, paddingVertical: 2 }]}
               onPress={event => {
                 event.stopPropagation();
                 onOpenComments();
@@ -577,16 +619,35 @@ function ProductCard({
               accessibilityLabel="Komentar produk"
             >
               <MessageCircle
-                size={18}
+                size={16}
                 color="#64748B"
                 strokeWidth={1.8}
               />
+              <Text
+                style={{
+                  marginTop: 0,
+                  fontSize: 8,
+                  lineHeight: 10,
+                  fontWeight: "500",
+                  color: "#94A3B8",
+                }}
+              >
+                {formatEngagementCount(
+                  getDummyCardEngagement(
+                    product.id
+                  ).comment
+                )}
+              </Text>
             </Pressable>
 
             <Pressable
-              style={
-                styles.cardIconButton
-              }
+              style={[
+                styles.cardIconButton,
+                {
+                  flex: 1,
+                  paddingVertical: 2,
+                },
+              ]}
               onPress={event => {
                 event.stopPropagation();
                 void handleShareCard();
@@ -594,10 +655,25 @@ function ProductCard({
               accessibilityLabel="Share produk"
             >
               <ShareIcon
-                size={18}
+                size={16}
                 color="#64748B"
                 strokeWidth={1.8}
               />
+              <Text
+                style={{
+                  marginTop: 0,
+                  fontSize: 8,
+                  lineHeight: 10,
+                  fontWeight: "500",
+                  color: "#94A3B8",
+                }}
+              >
+                {formatEngagementCount(
+                  getDummyCardEngagement(
+                    product.id
+                  ).share
+                )}
+              </Text>
             </Pressable>
           </View>
         </View>
@@ -605,6 +681,8 @@ function ProductCard({
     </Pressable>
   );
 }
+
+
 
 type MainTab =
   | "store"
@@ -2071,7 +2149,8 @@ const styles = StyleSheet.create({
   },
 
   scrollContent: {
-    paddingHorizontal: HORIZONTAL_PADDING,
+    paddingLeft: HORIZONTAL_PADDING - 8,
+    paddingRight: HORIZONTAL_PADDING + 8,
     paddingTop: 4,
     paddingBottom: 104,
   },

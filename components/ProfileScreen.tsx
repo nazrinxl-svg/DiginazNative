@@ -1,3 +1,4 @@
+import { Bookmark } from "lucide-react-native";
 import { getLocalUser } from "../lib/localAuth";
 
 import React, {
@@ -307,6 +308,26 @@ export default function ProfileScreen({
   ] = useState(0);
 
 
+  const [
+    activeProductTab,
+    setActiveProductTab,
+  ] =
+    useState<
+      "mine" | "saved"
+    >("mine");
+
+  // SAVED_PRODUCTS_V1
+  const [
+    savedProductIds,
+    setSavedProductIds,
+  ] =
+    useState<string[]>([]);
+
+  const [
+    savedLoading,
+    setSavedLoading,
+  ] = useState(false);
+
   const myProducts =
     useMemo(
       () =>
@@ -323,6 +344,36 @@ export default function ProfileScreen({
       ]
     );
 
+
+  const savedProducts =
+    useMemo(
+      () =>
+        savedProductIds
+          .map(
+            productId =>
+              products.find(
+                product =>
+                  product.id ===
+                  productId
+              )
+          )
+          .filter(
+            (
+              product
+            ): product is StoreProductCardItem =>
+              Boolean(product)
+          ),
+      [
+        products,
+        savedProductIds,
+      ]
+    );
+
+  const visibleProducts =
+    activeProductTab ===
+    "saved"
+      ? savedProducts
+      : myProducts;
 
   const totalDownloads =
     useMemo(
@@ -341,6 +392,85 @@ export default function ProfileScreen({
         ),
       [myProducts]
     );
+
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSavedProducts() {
+      if (!currentUserId) {
+        setSavedProductIds([]);
+        return;
+      }
+
+      setSavedLoading(true);
+
+      try {
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from(
+              "store_product_saves"
+            )
+            .select(
+              "product_id,created_at"
+            )
+            .eq(
+              "user_id",
+              currentUserId
+            )
+            .order(
+              "created_at",
+              {
+                ascending: false,
+              }
+            );
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setSavedProductIds(
+          (data ?? [])
+            .map(
+              row =>
+                String(
+                  row.product_id ??
+                    ""
+                )
+            )
+            .filter(Boolean)
+        );
+      }
+      catch (error) {
+        console.warn(
+          "Produk tersimpan gagal dimuat:",
+          error
+        );
+
+        if (active) {
+          setSavedProductIds([]);
+        }
+      }
+      finally {
+        if (active) {
+          setSavedLoading(false);
+        }
+      }
+    }
+
+    void loadSavedProducts();
+
+    return () => {
+      active = false;
+    };
+  }, [currentUserId]);
 
 
   useEffect(() => {
@@ -1768,20 +1898,34 @@ export default function ProfileScreen({
     setErrorMessage("");
 
     try {
-      const {
-        GoogleSignin,
-      } =
-        await import(
-          "@react-native-google-signin/google-signin"
-        );
+      /*
+       * Logout Google bersifat tambahan.
+       * Kalau Google logout gagal, session
+       * Supabase tetap HARUS dibersihkan.
+       */
+      try {
+        const {
+          GoogleSignin,
+        } =
+          await import(
+            "@react-native-google-signin/google-signin"
+          );
 
-      await GoogleSignin.signOut();
+        await GoogleSignin.signOut();
+      } catch (googleError) {
+        console.warn(
+          "Google logout dilewati:",
+          googleError
+        );
+      }
 
       const {
         error,
       } =
         await supabase.auth
-          .signOut();
+          .signOut({
+            scope: "local",
+          });
 
       if (error) {
         throw error;
@@ -1798,7 +1942,6 @@ export default function ProfileScreen({
           ? error.message
           : "Belum dapat keluar."
       );
-
     } finally {
       setLogoutLoading(false);
     }
@@ -3293,29 +3436,97 @@ export default function ProfileScreen({
           <View
             style={styles.tabBar}
           >
-            <View
-              style={
-                styles.activeTab
+            <Pressable
+              style={[
+                styles.productTab,
+                activeProductTab ===
+                  "mine" &&
+                  styles.productTabActive,
+              ]}
+              onPress={() =>
+                setActiveProductTab(
+                  "mine"
+                )
               }
             >
               <Grid3X3
-                size={19}
-                color="#0F172A"
-                strokeWidth={2.1}
+                size={18}
+                color={
+                  activeProductTab ===
+                  "mine"
+                    ? "#0F172A"
+                    : "#94A3B8"
+                }
+                strokeWidth={2}
               />
 
               <Text
-                style={
-                  styles.activeTabText
-                }
+                style={[
+                  styles.productTabText,
+                  activeProductTab ===
+                    "mine" &&
+                    styles.productTabTextActive,
+                ]}
               >
                 Produk Saya
               </Text>
-            </View>
+            </Pressable>
+
+
+
+            <Pressable
+              style={[
+                styles.productTab,
+                activeProductTab ===
+                  "saved" &&
+                  styles.productTabActive,
+              ]}
+              onPress={() =>
+                setActiveProductTab(
+                  "saved"
+                )
+              }
+            >
+              <Bookmark
+                size={18}
+                color={
+                  activeProductTab ===
+                  "saved"
+                    ? "#0F172A"
+                    : "#94A3B8"
+                }
+                strokeWidth={2}
+              />
+
+              <Text
+                style={[
+                  styles.productTabText,
+                  activeProductTab ===
+                    "saved" &&
+                    styles.productTabTextActive,
+                ]}
+              >
+                Tersimpan
+              </Text>
+            </Pressable>
           </View>
 
+          {activeProductTab ===
+            "saved" &&
+          savedLoading ? (
+            <View style={styles.empty}>
+              <ActivityIndicator
+                size="small"
+                color="#2563EB"
+              />
 
-          {myProducts.length ===
+              <Text
+                style={styles.emptyText}
+              >
+                Memuat tersimpan...
+              </Text>
+            </View>
+          ) : visibleProducts.length ===
           0 ? (
             <View
               style={styles.empty}
@@ -3330,7 +3541,10 @@ export default function ProfileScreen({
                   styles.emptyTitle
                 }
               >
-                Belum ada produk
+                {activeProductTab ===
+                "saved"
+                  ? "Belum ada produk tersimpan"
+                  : "Belum ada produk"}
               </Text>
 
               <Text
@@ -3338,16 +3552,17 @@ export default function ProfileScreen({
                   styles.emptyText
                 }
               >
-                Produk yang Anda
-                publikasikan akan
-                tampil di sini.
+                {activeProductTab ===
+                "saved"
+                  ? "Produk yang Anda simpan akan tampil di sini."
+                  : "Produk yang Anda publikasikan akan tampil di sini."}
               </Text>
             </View>
           ) : (
             <View
               style={styles.grid}
             >
-              {myProducts.map(
+              {visibleProducts.map(
                 (product) => (
                   <Pressable
                     key={
@@ -3577,15 +3792,44 @@ const styles =
 
     tabBar: {
       marginTop: 0,
+      height: 46,
       borderTopWidth:
         StyleSheet.hairlineWidth,
       borderBottomWidth:
         StyleSheet.hairlineWidth,
       borderColor: "#E2E8F0",
-      height: 46,
+      flexDirection: "row",
       alignItems: "center",
-      justifyContent:
-        "center",
+    },
+
+    productTab: {
+      flex: 1,
+      height: "100%",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      borderBottomWidth: 2,
+      borderBottomColor:
+        "transparent",
+    },
+
+    productTabActive: {
+      borderBottomColor:
+        "#0F172A",
+    },
+
+    productTabText: {
+      fontSize: 13,
+      fontFamily:
+        "PlusJakartaSans_600SemiBold",
+      color: "#94A3B8",
+    },
+
+    productTabTextActive: {
+      fontFamily:
+        "PlusJakartaSans_700Bold",
+      color: "#0F172A",
     },
 
     activeTab: {

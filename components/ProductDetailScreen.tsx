@@ -1,3 +1,4 @@
+import { formatEngagementCount, getDummyCardEngagement } from "../lib/storeEngagement";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -107,6 +108,13 @@ export default function ProductDetailScreen({
 
   const [localPreviewSession] = useState(createStoreProductPreviewSession);
   const pagePreview = previewSession ?? localPreviewSession;
+
+  // SHARED_PRODUCT_ENGAGEMENT
+  // Angka sama dengan kartu Store untuk product.id yang sama.
+  const dummyEngagement =
+    getDummyCardEngagement(
+      product.id
+    );
   const openedAtRef = useRef(Date.now());
   const imageStartedRef = useRef(new Map<string, number>());
   const sourceUrlsRef = useRef<Array<string | null>>([]);
@@ -1857,11 +1865,7 @@ export default function ProductDetailScreen({
                         styles.loveActionText,
                     ]}
                   >
-                    Love{
-                      loveCount > 0
-                        ? ` ${loveCount}`
-                        : ""
-                    }
+                    Love {formatEngagementCount(dummyEngagement.love)}
                   </Text>
                 </Pressable>
 
@@ -1908,7 +1912,7 @@ export default function ProductDetailScreen({
                         styles.saveActionText,
                     ]}
                   >
-                    Save
+                    Save {formatEngagementCount(dummyEngagement.save)}
                   </Text>
                 </Pressable>
               </>
