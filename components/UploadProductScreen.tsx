@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -36,6 +36,10 @@ type PickedAsset = {
   uri: string;
   fileName?: string | null;
   mimeType?: string | null;
+
+  // EDIT_EXISTING_PAGE:
+  // Jika terisi, halaman ini sudah ada di Storage.
+  storagePath?: string | null;
 };
 
 const PRODUCT_TYPES = [
@@ -151,6 +155,9 @@ export default function UploadProductScreen({
   const [productFile, setProductFile] =
     useState<PickedAsset | null>(null);
 
+  const [productPages, setProductPages] =
+    useState<PickedAsset[]>([]);
+
   const [submitting, setSubmitting] =
     useState(false);
 
@@ -198,6 +205,84 @@ export default function UploadProductScreen({
 
         if (error) {
           throw error;
+        }
+
+        // EDIT_SLIDES_LOAD_EXISTING
+        const {
+          data: pageRows,
+          error: pageRowsError,
+        } = await supabase
+          .from("store_product_pages")
+          .select(
+            "page_number,storage_path,mime_type,original_name"
+          )
+          .eq(
+            "product_id",
+            editProductId
+          )
+          .order(
+            "page_number",
+            {
+              ascending: true,
+            }
+          );
+
+        if (pageRowsError) {
+          throw pageRowsError;
+        }
+
+        const loadedPages:
+          PickedAsset[] = [];
+
+        for (
+          const row of pageRows ?? []
+        ) {
+          const storagePath =
+            String(
+              row.storage_path ?? ""
+            ).trim();
+
+          if (!storagePath) {
+            continue;
+          }
+
+          const {
+            data: signed,
+            error: signedError,
+          } = await supabase.storage
+            .from(
+              "store-product-files"
+            )
+            .createSignedUrl(
+              storagePath,
+              3600
+            );
+
+          if (
+            signedError ||
+            !signed?.signedUrl
+          ) {
+            throw (
+              signedError ??
+              new Error(
+                "Preview halaman produk tidak dapat disiapkan."
+              )
+            );
+          }
+
+          loadedPages.push({
+            uri: signed.signedUrl,
+
+            fileName:
+              row.original_name ??
+              `Halaman ${row.page_number}`,
+
+            mimeType:
+              row.mime_type ??
+              "image/jpeg",
+
+            storagePath,
+          });
         }
 
         if (!active) {
@@ -250,6 +335,31 @@ export default function UploadProductScreen({
         setDescription(
           data.description ?? ""
         );
+
+        if (
+          loadedPages.length > 0
+        ) {
+          setProductFileKind(
+            "image"
+          );
+
+          setProductPages(
+            loadedPages
+          );
+
+          setProductFile(
+            loadedPages[0]
+          );
+        } else {
+          setProductPages([]);
+          setProductFile(null);
+
+          setProductFileKind(
+            data.file_path
+              ? "pdf"
+              : null
+          );
+        }
       } catch (error) {
         if (!active) {
           return;
@@ -297,6 +407,7 @@ export default function UploadProductScreen({
     // Hindari file lama tetap terbaca
     // setelah jenis file diganti.
     setProductFile(null);
+    setProductPages([]);
 
     setErrorMessage("");
   }
@@ -311,7 +422,7 @@ export default function UploadProductScreen({
 
       if (!permission.granted) {
         setErrorMessage(
-          "Izin galeri diperlukan untuk memilih thumbnail."
+          "Izin galeri diperlukan untuk memilih cover produk."
         );
         return;
       }
@@ -320,11 +431,11 @@ export default function UploadProductScreen({
         await ImageCropPicker.openPicker({
           mediaType: "photo",
           width: 1080,
-          height: 1350,
+          height: 1080,
           cropping: true,
           compressImageQuality: 0.9,
           cropperToolbarTitle:
-            "Atur Thumbnail 4:5",
+            "Atur Cover 1:1",
           cropperChooseText:
             "Gunakan",
           cropperCancelText:
@@ -362,8 +473,547 @@ export default function UploadProductScreen({
       }
 
       setErrorMessage(
-        "Thumbnail belum dapat dipilih."
+        "Cover produk belum dapat dipilih."
       );
+    }
+  }
+
+
+
+  function removeProductPage(
+    index: number
+  ) {
+    const nextPages =
+      productPages.filter(
+        (_, pageIndex) =>
+          pageIndex !== index
+      );
+
+    setProductPages(
+      nextPages
+    );
+
+    // Halaman pertama tetap menjadi
+    // file_path utama agar alur lama
+    // tetap kompatibel.
+    setProductFile(
+      nextPages[0] ??
+      null
+    );
+  }
+
+
+  async function syncProductImagePages(
+    userId: string,
+    productId: string,
+    firstStoragePath: string,
+    pages: PickedAsset[]
+  ) {
+    if (
+      pages.length === 0
+    ) {
+      return;
+    }
+
+    const {
+      data: previousRows,
+      error: previousRowsError,
+    } =
+      await supabase
+        .from(
+          "store_product_pages"
+        )
+        .select(
+          "storage_path"
+        )
+        .eq(
+          "product_id",
+          productId
+        );
+
+    if (previousRowsError) {
+      throw previousRowsError;
+    }
+
+    const previousPaths =
+      (previousRows ?? [])
+        .map(row =>
+          String(
+            row.storage_path ??
+            ""
+          )
+        )
+        .filter(Boolean);
+
+    const rows = [
+      {
+        product_id:
+          productId,
+
+        page_number:
+          1,
+
+        storage_path:
+          firstStoragePath,
+
+        mime_type:
+          pages[0].mimeType ??
+          "image/jpeg",
+
+        original_name:
+          pages[0].fileName ??
+          null,
+      },
+    ];
+
+    const currentPaths: string[] =
+      [
+        firstStoragePath,
+      ];
+
+    const uploadedExtras:
+      string[] = [];
+
+    try {
+      const batchId =
+        Date.now();
+
+      for (
+        let index = 1;
+        index < pages.length;
+        index++
+      ) {
+        const page =
+          pages[index];
+
+        const extension =
+          getExtension(
+            page,
+            "jpg"
+          );
+
+        const rawName =
+          page.fileName ??
+          `halaman-${index + 1}.${extension}`;
+
+        const cleanName =
+          safeFileName(
+            rawName
+          );
+
+        const storagePath =
+          `${userId}/${productId}/pages/` +
+          `page-${String(
+            index + 1
+          ).padStart(
+            3,
+            "0"
+          )}-${batchId}-${cleanName}`;
+
+        const buffer =
+          await fetch(
+            page.uri
+          ).then(
+            response =>
+              response.arrayBuffer()
+          );
+
+        const {
+          error: uploadError,
+        } =
+          await supabase.storage
+            .from(
+              "store-product-files"
+            )
+            .upload(
+              storagePath,
+              buffer,
+              {
+                contentType:
+                  page.mimeType ??
+                  "image/jpeg",
+
+                upsert:
+                  false,
+              }
+            );
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        uploadedExtras.push(
+          storagePath
+        );
+
+        currentPaths.push(
+          storagePath
+        );
+
+        rows.push({
+          product_id:
+            productId,
+
+          page_number:
+            index + 1,
+
+          storage_path:
+            storagePath,
+
+          mime_type:
+            page.mimeType ??
+            "image/jpeg",
+
+          original_name:
+            page.fileName ??
+            null,
+        });
+      }
+
+
+      const {
+        error: upsertError,
+      } =
+        await supabase
+          .from(
+            "store_product_pages"
+          )
+          .upsert(
+            rows,
+            {
+              onConflict:
+                "product_id,page_number",
+            }
+          );
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+
+      const {
+        error: trimError,
+      } =
+        await supabase
+          .from(
+            "store_product_pages"
+          )
+          .delete()
+          .eq(
+            "product_id",
+            productId
+          )
+          .gt(
+            "page_number",
+            pages.length
+          );
+
+      if (trimError) {
+        throw trimError;
+      }
+
+
+      const stalePaths =
+        previousPaths.filter(
+          path =>
+            !currentPaths.includes(
+              path
+            )
+        );
+
+      if (
+        stalePaths.length > 0
+      ) {
+        const {
+          error: cleanupError,
+        } =
+          await supabase.storage
+            .from(
+              "store-product-files"
+            )
+            .remove(
+              stalePaths
+            );
+
+        if (cleanupError) {
+          console.warn(
+            "Halaman lama belum terhapus:",
+            cleanupError
+          );
+        }
+      }
+    }
+    catch (error) {
+      if (
+        uploadedExtras.length > 0
+      ) {
+        await supabase.storage
+          .from(
+            "store-product-files"
+          )
+          .remove(
+            uploadedExtras
+          );
+      }
+
+      throw error;
+    }
+  }
+
+
+  // EDIT_SLIDES_SYNC_V1
+  async function syncEditedImagePages(
+    userId: string,
+    productId: string,
+    pages: PickedAsset[]
+  ): Promise<{
+    firstStoragePath: string;
+    stalePaths: string[];
+  }> {
+    if (pages.length === 0) {
+      throw new Error(
+        "Produk gambar minimal memiliki 1 halaman."
+      );
+    }
+
+    const {
+      data: previousRows,
+      error: previousRowsError,
+    } = await supabase
+      .from("store_product_pages")
+      .select(
+        "storage_path"
+      )
+      .eq(
+        "product_id",
+        productId
+      );
+
+    if (previousRowsError) {
+      throw previousRowsError;
+    }
+
+    const previousPaths =
+      (previousRows ?? [])
+        .map(row =>
+          String(
+            row.storage_path ?? ""
+          ).trim()
+        )
+        .filter(Boolean);
+
+    const currentPaths:
+      string[] = [];
+
+    const uploadedPaths:
+      string[] = [];
+
+    const rows: Array<{
+      product_id: string;
+      page_number: number;
+      storage_path: string;
+      mime_type: string;
+      original_name: string | null;
+    }> = [];
+
+    let databaseWasUpdated =
+      false;
+
+    try {
+      const batchId =
+        Date.now();
+
+      for (
+        let index = 0;
+        index < pages.length;
+        index++
+      ) {
+        const page =
+          pages[index];
+
+        let storagePath =
+          page.storagePath
+            ?.trim() ??
+          "";
+
+        // storagePath hanya boleh dipakai
+        // jika memang berasal dari produk ini.
+        if (
+          storagePath &&
+          !previousPaths.includes(
+            storagePath
+          )
+        ) {
+          storagePath = "";
+        }
+
+        // Halaman baru: baru upload.
+        if (!storagePath) {
+          const extension =
+            getExtension(
+              page,
+              "jpg"
+            );
+
+          const rawName =
+            page.fileName ??
+            `halaman-${index + 1}.${extension}`;
+
+          const cleanName =
+            safeFileName(
+              rawName
+            );
+
+          storagePath =
+            `${userId}/${productId}/pages/` +
+            `page-${String(
+              index + 1
+            ).padStart(
+              3,
+              "0"
+            )}-${batchId}-${cleanName}`;
+
+          const buffer =
+            await fetch(
+              page.uri
+            ).then(
+              response =>
+                response.arrayBuffer()
+            );
+
+          const {
+            error: uploadError,
+          } =
+            await supabase.storage
+              .from(
+                "store-product-files"
+              )
+              .upload(
+                storagePath,
+                buffer,
+                {
+                  contentType:
+                    page.mimeType ??
+                    "image/jpeg",
+
+                  upsert:
+                    false,
+                }
+              );
+
+          if (uploadError) {
+            throw uploadError;
+          }
+
+          uploadedPaths.push(
+            storagePath
+          );
+        }
+
+        currentPaths.push(
+          storagePath
+        );
+
+        rows.push({
+          product_id:
+            productId,
+
+          page_number:
+            index + 1,
+
+          storage_path:
+            storagePath,
+
+          mime_type:
+            page.mimeType ??
+            "image/jpeg",
+
+          original_name:
+            page.fileName ??
+            null,
+        });
+      }
+
+      const {
+        error: upsertError,
+      } =
+        await supabase
+          .from(
+            "store_product_pages"
+          )
+          .upsert(
+            rows,
+            {
+              onConflict:
+                "product_id,page_number",
+            }
+          );
+
+      if (upsertError) {
+        throw upsertError;
+      }
+
+      databaseWasUpdated =
+        true;
+
+      const {
+        error: trimError,
+      } =
+        await supabase
+          .from(
+            "store_product_pages"
+          )
+          .delete()
+          .eq(
+            "product_id",
+            productId
+          )
+          .gt(
+            "page_number",
+            pages.length
+          );
+
+      if (trimError) {
+        throw trimError;
+      }
+
+      const stalePaths =
+        previousPaths.filter(
+          path =>
+            !currentPaths.includes(
+              path
+            )
+        );
+
+      return {
+        firstStoragePath:
+          currentPaths[0],
+
+        stalePaths,
+      };
+    }
+    catch (error) {
+      // Kalau DB belum berubah,
+      // upload baru aman dibersihkan.
+      if (
+        !databaseWasUpdated &&
+        uploadedPaths.length > 0
+      ) {
+        try {
+          await supabase.storage
+            .from(
+              "store-product-files"
+            )
+            .remove(
+              uploadedPaths
+            );
+        }
+        catch {
+          // cleanup best effort
+        }
+      }
+
+      throw error;
     }
   }
 
@@ -393,47 +1043,112 @@ export default function UploadProductScreen({
 
       if (!permission.granted) {
         setErrorMessage(
-          "Izin galeri diperlukan untuk memilih gambar."
+          "Izin galeri diperlukan untuk memilih gambar produk."
         );
 
         return;
       }
 
+      try {
+        const picked =
+          await ImageCropPicker.openPicker({
+            mediaType:
+              "photo",
 
-      const result =
-        await ImagePicker
-          .launchImageLibraryAsync({
-            mediaTypes: [
-              "images",
-            ],
-            allowsEditing: false,
-            quality: 1,
+            multiple:
+              true,
+
+            compressImageQuality:
+              0.9,
           });
 
+        const images =
+          Array.isArray(picked)
+            ? picked
+            : [picked];
 
-      if (
-        result.canceled ||
-        result.assets.length === 0
-      ) {
-        return;
+        const pickedPages =
+          images
+            .filter(
+              image =>
+                Boolean(
+                  image?.path
+                )
+            )
+            .map(
+              (
+                image,
+                index
+              ) => {
+                const mimeType =
+                  image.mime ??
+                  "image/jpeg";
+
+                const extension =
+                  mimeType ===
+                    "image/png"
+                    ? "png"
+                    : mimeType ===
+                        "image/webp"
+                      ? "webp"
+                      : "jpg";
+
+                return {
+                  uri:
+                    image.path,
+
+                  fileName:
+                    `halaman-${Date.now()}-${index + 1}.${extension}`,
+
+                  mimeType,
+                };
+              }
+            );
+
+        if (
+          pickedPages.length === 0
+        ) {
+          return;
+        }
+
+        const nextPages =
+          [
+            ...productPages,
+            ...pickedPages,
+          ].slice(
+            0,
+            20
+          );
+
+        setProductPages(
+          nextPages
+        );
+
+        setProductFile(
+          nextPages[0] ??
+          null
+        );
       }
+      catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "";
 
+        if (
+          message
+            .toLowerCase()
+            .includes(
+              "cancel"
+            )
+        ) {
+          return;
+        }
 
-      const asset =
-        result.assets[0];
-
-
-      setProductFile({
-        uri: asset.uri,
-
-        fileName:
-          asset.fileName ??
-          `produk-${Date.now()}.jpg`,
-
-        mimeType:
-          asset.mimeType ??
-          "image/jpeg",
-      });
+        setErrorMessage(
+          "Gambar produk belum dapat dipilih."
+        );
+      }
 
       return;
     }
@@ -511,6 +1226,19 @@ export default function UploadProductScreen({
     ) {
       setErrorMessage(
         "Pilih file produk terlebih dahulu."
+      );
+      return;
+    }
+
+    if (
+      editProductId &&
+      productFileKind ===
+        "image" &&
+      productPages.length ===
+        0
+    ) {
+      setErrorMessage(
+        "Produk gambar minimal memiliki 1 halaman."
       );
       return;
     }
@@ -619,7 +1347,10 @@ export default function UploadProductScreen({
             thumbnailPath;
         }
 
-        if (productFile) {
+        if (
+          productFile &&
+          productFileKind !== "image"
+        ) {
           const rawFileName =
             productFile.fileName ??
             `produk-${Date.now()}`;
@@ -660,6 +1391,39 @@ export default function UploadProductScreen({
             filePath;
         }
 
+        let editImageSync:
+          {
+            firstStoragePath: string;
+            stalePaths: string[];
+          } |
+          null = null;
+
+        if (
+          productFileKind ===
+            "image"
+        ) {
+          if (
+            productPages.length ===
+            0
+          ) {
+            throw new Error(
+              "Produk gambar minimal memiliki 1 halaman."
+            );
+          }
+
+          editImageSync =
+            await syncEditedImagePages(
+              user.id,
+              existing.id,
+              productPages
+            );
+
+          nextFilePath =
+            editImageSync
+              .firstStoragePath;
+        }
+
+
         const {
           data: updated,
           error: updateError,
@@ -699,6 +1463,32 @@ export default function UploadProductScreen({
           );
         }
 
+        // Baru bersihkan file slide yang
+        // benar-benar dihapus setelah save sukses.
+        if (
+          editImageSync &&
+          editImageSync.stalePaths.length >
+            0
+        ) {
+          const {
+            error: cleanupPagesError,
+          } =
+            await supabase.storage
+              .from(
+                "store-product-files"
+              )
+              .remove(
+                editImageSync.stalePaths
+              );
+
+          if (cleanupPagesError) {
+            console.warn(
+              "Slide lama belum terhapus dari Storage:",
+              cleanupPagesError
+            );
+          }
+        }
+
         if (
           thumbnail &&
           existing.thumbnail_path &&
@@ -723,6 +1513,12 @@ export default function UploadProductScreen({
 
         if (
           productFile &&
+          !(
+            productFileKind ===
+              "image" &&
+            productPages.length >
+              0
+          ) &&
           existing.file_path &&
           existing.file_path !==
             nextFilePath
@@ -872,6 +1668,22 @@ export default function UploadProductScreen({
       if (fileError) {
         throw fileError;
       }
+
+      if (
+        productFileKind ===
+          "image" &&
+        productPages.length >
+          0 &&
+        filePath
+      ) {
+        await syncProductImagePages(
+          user.id,
+          created.id,
+          filePath,
+          productPages
+        );
+      }
+
 
       const {
         error: publishError,
@@ -1400,7 +2212,7 @@ export default function UploadProductScreen({
 
           <View style={styles.field}>
             <Text style={styles.label}>
-              Thumbnail
+              Cover Produk
             </Text>
 
             <Pressable
@@ -1441,7 +2253,7 @@ export default function UploadProductScreen({
                         styles.thumbnailRatio
                       }
                     >
-                      4:5
+                      1:1
                     </Text>
                   </View>
                 )}
@@ -1458,10 +2270,10 @@ export default function UploadProductScreen({
                   }
                 >
                   {thumbnail
-                    ? "Thumbnail siap"
+                    ? "Cover siap"
                     : editProductId
-                      ? "Ganti thumbnail"
-                      : "Pilih thumbnail"}
+                      ? "Ganti cover"
+                      : "Pilih cover"}
                 </Text>
 
                 <Text
@@ -1469,7 +2281,7 @@ export default function UploadProductScreen({
                     styles.thumbnailSizeText
                   }
                 >
-                  Rasio 4:5
+                  Rasio 1:1
                 </Text>
 
                 <Text
@@ -1477,7 +2289,7 @@ export default function UploadProductScreen({
                     styles.thumbnailSizeText
                   }
                 >
-                  1080 × 1350 px
+                  1080 × 1080 px
                 </Text>
 
                 <Text
@@ -1645,63 +2457,206 @@ export default function UploadProductScreen({
 
           <View style={styles.field}>
             <Text style={styles.label}>
-              File Produk
+              {productFileKind ===
+              "image"
+                ? "Isi Produk"
+                : "File Produk"}
             </Text>
 
-            <Pressable
-              style={[
-                styles.filePicker,
+            {productFileKind ===
+            "image" ? (
+              <>
+                <Pressable
+                  style={
+                    styles.filePicker
+                  }
+                  onPress={
+                    chooseProductFile
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileIcon
+                    }
+                  >
+                    <ImageIcon
+                      size={20}
+                      color="#2563EB"
+                    />
+                  </View>
 
-                !productFileKind &&
-                  styles.filePickerDisabled,
-              ]}
-              onPress={
-                chooseProductFile
-              }
-            >
-              <View style={styles.fileIcon}>
-                {productFileKind ===
-                "image" ? (
-                  <ImageIcon
-                    size={20}
-                    color="#2563EB"
-                  />
-                ) : (
+                  <View
+                    style={
+                      styles.fileInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTitle
+                      }
+                    >
+                      {productPages.length >
+                      0
+                        ? `${productPages.length} halaman dipilih`
+                        : "Pilih beberapa gambar"}
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileName
+                      }
+                    >
+                      JPG, PNG atau WEBP • maksimal 20 halaman
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <Text
+                  style={
+                    styles.productPageHint
+                  }
+                >
+                  Setiap gambar menjadi satu halaman. Preview menggunakan rasio A4 dan gambar tidak dipotong.
+                </Text>
+
+                {productPages.length >
+                0 ? (
+                  <ScrollView
+                    horizontal
+                    nestedScrollEnabled
+                    showsHorizontalScrollIndicator={
+                      false
+                    }
+                    contentContainerStyle={
+                      styles.productPageList
+                    }
+                  >
+                    {productPages.map(
+                      (
+                        page,
+                        index
+                      ) => (
+                        <View
+                          key={
+                            page.uri +
+                            index
+                          }
+                          style={
+                            styles.productPageCard
+                          }
+                        >
+                          <Image
+                            source={{
+                              uri:
+                                page.uri,
+                            }}
+                            style={
+                              styles.productPageImage
+                            }
+                            resizeMode="contain"
+                          />
+
+                          <Text
+                            style={
+                              styles.productPageNumber
+                            }
+                          >
+                            Halaman {index + 1}
+                          </Text>
+
+                          <Pressable
+                            onPress={() => {
+                              if (
+                                editProductId &&
+                                productPages.length <=
+                                  1
+                              ) {
+                                setErrorMessage(
+                                  "Produk gambar minimal memiliki 1 halaman."
+                                );
+                                return;
+                              }
+
+                              removeProductPage(
+                                index
+                              );
+                            }}
+                            hitSlop={8}
+                            style={
+                              styles.productPageRemove
+                            }
+                          >
+                            <Text
+                              style={
+                                styles.productPageRemoveText
+                              }
+                            >
+                              ×
+                            </Text>
+                          </Pressable>
+                        </View>
+                      )
+                    )}
+                  </ScrollView>
+                ) : null}
+              </>
+            ) : (
+              <Pressable
+                style={[
+                  styles.filePicker,
+
+                  !productFileKind &&
+                    styles.filePickerDisabled,
+                ]}
+                onPress={
+                  chooseProductFile
+                }
+              >
+                <View
+                  style={
+                    styles.fileIcon
+                  }
+                >
                   <FileText
                     size={20}
                     color="#2563EB"
                   />
-                )}
-              </View>
+                </View>
 
-              <View style={styles.fileInfo}>
-                <Text style={styles.fileTitle}>
-                  {productFile
-                    ? "File baru dipilih"
-                    : editProductId
-                      ? "File produk saat ini"
-                      : productFileKind === "pdf"
-                        ? "Pilih PDF"
-                        : productFileKind === "image"
-                          ? "Pilih gambar"
-                          : "Pilih jenis file dahulu"}
-                </Text>
-
-                <Text
-                  style={styles.fileName}
-                  numberOfLines={1}
+                <View
+                  style={
+                    styles.fileInfo
+                  }
                 >
-                  {productFile?.fileName ??
-                    (editProductId
-                      ? "Tetap gunakan file lama"
-                      : productFileKind === "pdf"
-                        ? "PDF saja"
-                        : productFileKind === "image"
-                          ? "JPG, PNG atau WEBP"
-                          : "PDF atau Gambar")}
-                </Text>
-              </View>
-            </Pressable>
+                  <Text
+                    style={
+                      styles.fileTitle
+                    }
+                  >
+                    {productFile
+                      ? "File baru dipilih"
+                      : editProductId
+                        ? "File produk saat ini"
+                        : productFileKind ===
+                            "pdf"
+                          ? "Pilih PDF"
+                          : "Pilih jenis file dahulu"}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.fileName
+                    }
+                    numberOfLines={1}
+                  >
+                    {productFile?.fileName ??
+                      (editProductId
+                        ? "Tetap gunakan file lama"
+                        : "PDF saja")}
+                  </Text>
+                </View>
+              </Pressable>
+            )}
           </View>
 
           <View style={styles.field}>
@@ -1909,7 +2864,7 @@ const styles = StyleSheet.create({
 
   thumbnailPreview: {
     width: 88,
-    height: 110,
+    height: 88,
     borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#F1F5F9",
@@ -1962,6 +2917,70 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 15,
     color: "#94A3B8",
+  },
+
+  productPageHint: {
+    marginTop: 7,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#64748B",
+  },
+
+  productPageList: {
+    paddingTop: 10,
+    paddingBottom: 3,
+    gap: 10,
+  },
+
+  productPageCard: {
+    width: 96,
+    minHeight: 150,
+    padding: 5,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 10,
+    backgroundColor: "#FFFFFF",
+    position: "relative",
+  },
+
+  productPageImage: {
+    width: 84,
+    aspectRatio: 210 / 297,
+    alignSelf: "center",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 5,
+  },
+
+  productPageNumber: {
+    marginTop: 4,
+    textAlign: "center",
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 9,
+    color: "#475569",
+  },
+
+  productPageRemove: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor:
+      "rgba(15, 23, 42, 0.78)",
+  },
+
+  productPageRemoveText: {
+    marginTop: -2,
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 16,
+    color: "#FFFFFF",
   },
 
   filePicker: {
