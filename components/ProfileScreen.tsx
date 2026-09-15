@@ -1920,7 +1920,22 @@ export default function ProfileScreen({
             "@react-native-google-signin/google-signin"
           );
 
-        await GoogleSignin.signOut();
+        /*
+         * Ganti akun tidak boleh tertahan
+         * jika Google Sign-In lambat merespons.
+         */
+        await Promise.race([
+          GoogleSignin.signOut(),
+
+          new Promise<void>(
+            resolve => {
+              setTimeout(
+                resolve,
+                1800
+              );
+            }
+          ),
+        ]);
       } catch (googleError) {
         console.warn(
           "Google logout dilewati:",
@@ -1959,15 +1974,15 @@ export default function ProfileScreen({
 
   function confirmLogout() {
     Alert.alert(
-      "Keluar dari Diginaz?",
-      "Anda perlu masuk kembali untuk menggunakan Diginaz.",
+      "Ganti akun?",
+      "Anda akan kembali ke halaman masuk untuk memilih akun Google lain.",
       [
         {
           text: "Batal",
           style: "cancel",
         },
         {
-          text: "Keluar",
+          text: "Ganti akun",
           style: "destructive",
           onPress: () => {
             void handleLogout();
@@ -2891,7 +2906,7 @@ export default function ProfileScreen({
                   styles.logoutText,
                 ]}
               >
-                Keluar akun
+                Ganti akun
               </Text>
             </Pressable>
           </View>

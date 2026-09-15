@@ -22,9 +22,8 @@ import {
   Heart,
   MessageCircle,
   Pencil,
-  UserRound,
-  UserPlus,
-  UserCheck,
+  Plus,
+  Check,
 
   ShieldCheck,
   Trash2,
@@ -232,6 +231,11 @@ export default function ProductDetailScreen({
     followLoading,
     setFollowLoading,
   ] = useState(false);
+
+  const [
+    creatorAvatarUrl,
+    setCreatorAvatarUrl,
+  ] = useState("");
 
   // DOWNLOAD_SUCCESS_DIGINAZ_MODAL_STATE
   const [
@@ -779,6 +783,75 @@ export default function ProductDetailScreen({
 
   const isOwner =
     currentUserId === product.creatorUserId;
+
+  // CREATOR_AVATAR_FOR_FOLLOW_UI
+  useEffect(() => {
+    let active = true;
+
+    async function loadCreatorAvatar() {
+      try {
+        const {
+          data,
+          error,
+        } =
+          await supabase
+            .from(
+              "app_profiles"
+            )
+            .select(
+              "avatar_url"
+            )
+            .eq(
+              "auth_user_id",
+              product.creatorUserId
+            )
+            .maybeSingle();
+
+        if (error) {
+          throw error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        const avatar =
+          String(
+            data?.avatar_url ?? ""
+          ).trim();
+
+        setCreatorAvatarUrl(
+          avatar
+        );
+
+        if (avatar) {
+          void Image.prefetch(
+            avatar
+          ).catch(
+            () => undefined
+          );
+        }
+      }
+      catch (error) {
+        console.warn(
+          "Avatar creator gagal dimuat:",
+          error
+        );
+
+        if (active) {
+          setCreatorAvatarUrl("");
+        }
+      }
+    }
+
+    void loadCreatorAvatar();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    product.creatorUserId,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -2063,7 +2136,7 @@ export default function ProductDetailScreen({
     >
       <StatusBar
         barStyle="dark-content"
-        backgroundColor="#F8FAFC"
+        backgroundColor="#FFFFFF"
       />
 
       <View style={styles.header}>
@@ -2140,61 +2213,95 @@ export default function ProductDetailScreen({
               styles.headerVisitorActions
             }
           >
-            <Pressable
+            <View
               style={
-                styles.headerVisitorIconButton
+                styles.creatorFollowWrap
               }
-              onPress={() =>
-                onOpenCreatorProfile(
-                  product.creatorUserId
-                )
-              }
-              hitSlop={6}
-              accessibilityLabel="Buka profil pembuat"
             >
-              <UserRound
-                size={18}
-                color="#334155"
-                strokeWidth={1.8}
-              />
-            </Pressable>
+              <Pressable
+                style={
+                  styles.creatorAvatarButton
+                }
+                onPress={() =>
+                  onOpenCreatorProfile(
+                    product.creatorUserId
+                  )
+                }
+                hitSlop={6}
+                accessibilityLabel="Buka profil pembuat"
+              >
+                {creatorAvatarUrl ? (
+                  <Image
+                    source={{
+                      uri:
+                        creatorAvatarUrl,
+                    }}
+                    style={
+                      styles.creatorAvatarImage
+                    }
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View
+                    style={
+                      styles.creatorAvatarPlaceholder
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.creatorAvatarInitial
+                      }
+                    >
+                      {String(
+                        detail?.creator_name ||
+                        product.author ||
+                        "D"
+                      )
+                        .trim()
+                        .charAt(0)
+                        .toUpperCase()}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
 
-            <Pressable
-              style={[
-                styles.headerVisitorFollowButton,
-                isFollowingCreator &&
-                  styles.headerVisitorFollowButtonActive,
-              ]}
-              onPress={() =>
-                void handleCreatorFollowToggle()
-              }
-              disabled={followLoading}
-              hitSlop={6}
-              accessibilityLabel={
-                isFollowingCreator
-                  ? "Berhenti mengikuti"
-                  : "Ikuti pembuat"
-              }
-            >
-              {followLoading ? (
-                <ActivityIndicator
-                  size="small"
-                  color="#2563EB"
-                />
-              ) : isFollowingCreator ? (
-                <UserCheck
-                  size={18}
-                  color="#2563EB"
-                  strokeWidth={1.9}
-                />
-              ) : (
-                <UserPlus
-                  size={18}
-                  color="#2563EB"
-                  strokeWidth={1.9}
-                />
-              )}
-            </Pressable>
+              <Pressable
+                style={[
+                  styles.creatorFollowBadge,
+                  isFollowingCreator &&
+                    styles.creatorFollowBadgeActive,
+                ]}
+                onPress={() =>
+                  void handleCreatorFollowToggle()
+                }
+                disabled={followLoading}
+                hitSlop={7}
+                accessibilityLabel={
+                  isFollowingCreator
+                    ? "Berhenti mengikuti"
+                    : "Ikuti pembuat"
+                }
+              >
+                {followLoading ? (
+                  <ActivityIndicator
+                    size={10}
+                    color="#FFFFFF"
+                  />
+                ) : isFollowingCreator ? (
+                  <Check
+                    size={13}
+                    color="#FFFFFF"
+                    strokeWidth={3}
+                  />
+                ) : (
+                  <Plus
+                    size={14}
+                    color="#FFFFFF"
+                    strokeWidth={3}
+                  />
+                )}
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -2559,152 +2666,12 @@ export default function ProductDetailScreen({
           </View>
 
 
-          <View
-            style={[
-              styles.productActions,
-              isOwner &&
-                styles.ownerProductActionsHidden,
-            ]}
-          >
-            {!isOwner ? (
-              <>
-                <Pressable
-                  style={
-                    styles.productAction
-                  }
-                  onPress={() =>
-                    void handleLoveToggle()
-                  }
-                  disabled={
-                    loveLoading
-                  }
-                  accessibilityLabel="Love produk"
-                >
-                  {loveLoading ? (
-                    <ActivityIndicator
-                      size="small"
-                      color="#E11D48"
-                    />
-                  ) : (
-                    <Heart
-                      size={21}
-                      color={
-                        isLoved
-                          ? "#E11D48"
-                          : "#64748B"
-                      }
-                      fill={
-                        isLoved
-                          ? "#E11D48"
-                          : "none"
-                      }
-                      strokeWidth={1.8}
-                    />
-                  )}
 
-                  <Text
-                    style={[
-                      styles.productActionText,
-
-                      isLoved &&
-                        styles.loveActionText,
-                    ]}
-                  >
-                    Love {formatEngagementCount(dummyEngagement.love)}
-                  </Text>
-                </Pressable>
-
-
-                <Pressable
-                  style={
-                    styles.productAction
-                  }
-                  onPress={() =>
-                    void handleSaveToggle()
-                  }
-                  disabled={
-                    saveLoading
-                  }
-                  accessibilityLabel="Save produk"
-                >
-                  {saveLoading ? (
-                    <ActivityIndicator
-                      size="small"
-                      color="#2563EB"
-                    />
-                  ) : (
-                    <Bookmark
-                      size={21}
-                      color={
-                        isSaved
-                          ? "#2563EB"
-                          : "#64748B"
-                      }
-                      fill={
-                        isSaved
-                          ? "#2563EB"
-                          : "none"
-                      }
-                      strokeWidth={1.8}
-                    />
-                  )}
-
-                  <Text
-                    style={[
-                      styles.productActionText,
-
-                      isSaved &&
-                        styles.saveActionText,
-                    ]}
-                  >
-                    Save {formatEngagementCount(dummyEngagement.save)}
-                  </Text>
-                </Pressable>
-              </>
-            ) : null}
-
-
-
-          </View>
 
 
           {!isOwner ? (
             <>
-              <Pressable
-                onPress={
-                  handleContactCreator
-                }
-                disabled={
-                  contactLoading
-                }
-                style={[
-                  styles.contactButton,
-                  contactLoading &&
-                    styles.contactButtonDisabled,
-                ]}
-              >
-                {contactLoading ? (
-                  <ActivityIndicator
-                    size="small"
-                    color="#FFFFFF"
-                  />
-                ) : (
-                  <>
-                    <MessageCircle
-                      size={18}
-                      color="#FFFFFF"
-                    />
 
-                    <Text
-                      style={
-                        styles.contactButtonText
-                      }
-                    >
-                      Hubungi Kreator
-                    </Text>
-                  </>
-                )}
-              </Pressable>
 
               {contactError ? (
                 <Text
@@ -2716,7 +2683,8 @@ export default function ProductDetailScreen({
                 </Text>
               ) : null}
 
-              <View style={styles.safetyBox}>
+              {product.price !== "Gratis" ? (
+                <View style={styles.safetyBox}>
               <View style={styles.safetyIcon}>
                 <ShieldCheck
                   size={20}
@@ -2728,22 +2696,18 @@ export default function ProductDetailScreen({
                 <Text
                   style={styles.safetyTitle}
                 >
-                  Tetap berhati-hati saat
-                  bertransaksi
+                  Transaksi langsung
                 </Text>
 
                 <Text
                   style={styles.safetyText}
                 >
-                  Transaksi dilakukan langsung
-                  antara pembeli dan kreator.
-                  Diginaz tidak memproses atau
-                  menyimpan pembayaran. Periksa
-                  detail produk dan kreator sebelum
-                  melakukan pembayaran.
+                  Bayar langsung ke kreator.
+                  Diginaz tidak memproses pembayaran.
                 </Text>
               </View>
             </View>
+              ) : null}
             </>
           ) : null}
 
@@ -2820,6 +2784,48 @@ export default function ProductDetailScreen({
       )}
 
       <View style={styles.detailPurchaseBar}>
+        {!isOwner ? (
+          <Pressable
+            style={[
+              styles.detailContactButton,
+              contactLoading &&
+                styles.detailContactButtonDisabled,
+            ]}
+            onPress={
+              handleContactCreator
+            }
+            disabled={
+              contactLoading
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Hubungi Kreator"
+          >
+            {contactLoading ? (
+              <ActivityIndicator
+                size="small"
+                color="#2563EB"
+              />
+            ) : (
+              <>
+                <MessageCircle
+                  size={19}
+                  color="#2563EB"
+                  strokeWidth={1.9}
+                />
+
+                <Text
+                  style={
+                    styles.detailContactButtonText
+                  }
+                  numberOfLines={1}
+                >
+                  Hubungi Kreator
+                </Text>
+              </>
+            )}
+          </Pressable>
+        ) : null}
+
         {canDownloadProduct ? (
           <Pressable
             style={[
@@ -3196,7 +3202,7 @@ export default function ProductDetailScreen({
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
+    backgroundColor: "#FFFFFF",
   },
 
   header: {
@@ -3205,9 +3211,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+
+    backgroundColor: "#FFFFFF",
+
     borderBottomWidth: 1,
     borderBottomColor: "#E2E8F0",
-    backgroundColor: "#FFFFFF",
+
+    position: "relative",
+    zIndex: 100,
+    elevation: 0,
+    shadowOpacity: 0,
   },
 
   headerButton: {
@@ -3246,33 +3259,68 @@ const styles = StyleSheet.create({
 
   headerVisitorActions: {
     marginLeft: "auto",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-
-  headerVisitorIconButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  headerVisitorFollowButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  creatorFollowWrap: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  creatorAvatarButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 2,
+    borderColor: "#DBEAFE",
     backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
 
-  headerVisitorFollowButtonActive: {
+  creatorAvatarImage: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 21,
+    backgroundColor: "#FFFFFF",
+  },
+
+  creatorAvatarPlaceholder: {
+    width: "100%",
+    height: "100%",
+    borderRadius: 21,
     backgroundColor: "#DBEAFE",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  creatorAvatarInitial: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 16,
+    color: "#2563EB",
+  },
+
+  creatorFollowBadge: {
+    position: "absolute",
+    bottom: -1,
+    alignSelf: "center",
+    width: 21,
+    height: 21,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  creatorFollowBadgeActive: {
+    backgroundColor: "#2563EB",
   },
 
   ownerProductActionsHidden: {
@@ -3358,6 +3406,34 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#EFF6FF",
+  },
+
+  detailContactButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "#BFDBFE",
+    backgroundColor: "#EFF6FF",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+
+  detailContactButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  detailContactButtonText: {
+    flexShrink: 1,
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11,
+    lineHeight: 15,
+    color: "#2563EB",
+    textAlign: "center",
   },
 
   detailPrimaryButton: {
@@ -3659,44 +3735,47 @@ const styles = StyleSheet.create({
   },
 
   safetyBox: {
+    marginTop: 8,
     marginHorizontal: 16,
-    marginTop: 20,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: "#EFF6FF",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#DBEAFE",
+    borderColor: "#E2E8F0",
+    backgroundColor: "#F8FAFC",
     flexDirection: "row",
-    gap: 11,
+    alignItems: "center",
+    gap: 9,
   },
 
   safetyIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: "#FFFFFF",
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
   },
 
   safetyContent: {
     flex: 1,
+    gap: 1,
   },
 
   safetyTitle: {
     fontFamily:
-      "PlusJakartaSans_700Bold",
-    fontSize: 10,
-    color: "#1E3A8A",
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 12.5,
+    lineHeight: 17,
+    color: "#334155",
   },
 
   safetyText: {
-    marginTop: 5,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 9,
-    lineHeight: 15,
-    color: "#475569",
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#64748B",
   },
 
   section: {

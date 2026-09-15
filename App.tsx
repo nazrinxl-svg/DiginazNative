@@ -59,6 +59,16 @@ import {
   logA4,
 } from "./lib/storeProductPreview";
 
+/*
+ * PUBLIC_STORE_PREVIEW_SHARED_CACHE
+ *
+ * Preview halaman produk bukan state pribadi user.
+ * Pertahankan signed preview URL + image warm cache
+ * ketika logout/login akun lain.
+ */
+const sharedStorePreviewSession =
+  createStoreProductPreviewSession();
+
 const SCREEN_WIDTH =
   Dimensions.get("window").width;
 
@@ -1059,7 +1069,8 @@ function StoreHome() {
   const [selectedProduct, setSelectedProduct] =
     useState<StoreProductCardItem | null>(null);
 
-  const [previewSession] = useState(createStoreProductPreviewSession);
+  const previewSession =
+    sharedStorePreviewSession;
   const [firstPagePaths, setFirstPagePaths] =
     useState<Record<string, string | null>>({});
   const selectedProductRef = useRef(selectedProduct);
