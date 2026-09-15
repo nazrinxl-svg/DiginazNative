@@ -1,5 +1,5 @@
-import { useUnreadNotificationCount } from "./lib/useUnreadNotificationCount";
-import React, { useEffect, useState } from "react";
+﻿import { useUnreadNotificationCount } from "./lib/useUnreadNotificationCount";
+import React, { useEffect, useRef, useState } from "react";
 import {
   BackHandler,
   ActivityIndicator,
@@ -34,6 +34,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import AuthScreen from "./components/AuthScreen";
 import ProductDetailScreen from "./components/ProductDetailScreen";
+import ProductCommentsScreen from "./components/ProductCommentsScreen";
 import ChatScreen from "./components/ChatScreen";
 import ChatInboxScreen from "./components/ChatInboxScreen";
 import NotificationScreen from "./components/NotificationScreen";
@@ -45,11 +46,17 @@ import {
   fetchPublishedStoreProductById,
   fetchPublishedStoreProducts,
   type StoreProductCardItem,
+  type StoreFirstPage,
 } from "./lib/storeProducts";
 import {
   readStoreProductsCache,
   writeStoreProductsCache,
 } from "./lib/storeProductCache";
+
+import {
+  createStoreProductPreviewSession,
+  logA4,
+} from "./lib/storeProductPreview";
 
 const SCREEN_WIDTH =
   Dimensions.get("window").width;
@@ -92,37 +99,39 @@ const CARD_WIDTH =
 function ProductCard({
   product,
   onPress,
+  onOpenComments,
+  currentUserId,
+  initialIsLoved,
+  initialLoveCount,
+  initialIsSaved,
 }: {
   product: StoreProductCardItem;
   onPress: () => void;
+  onOpenComments: () => void;
+  currentUserId: string | null;
+  initialIsLoved: boolean;
+  initialLoveCount: number;
+  initialIsSaved: boolean;
 }) {
   // CARD_LOVE_SAVE_SHARE
-
-  const [
-    currentUserId,
-    setCurrentUserId,
-  ] =
-    useState<string | null>(
-      null
-    );
 
   const [
     isLoved,
     setIsLoved,
   ] =
-    useState(false);
+    useState(initialIsLoved);
 
   const [
     loveCount,
     setLoveCount,
   ] =
-    useState(0);
+    useState(initialLoveCount);
 
   const [
     isSaved,
     setIsSaved,
   ] =
-    useState(false);
+    useState(initialIsSaved);
 
   const [
     loveLoading,
@@ -143,152 +152,22 @@ function ProductCard({
 
 
   useEffect(() => {
-    let active = true;
+    setIsLoved(
+      initialIsLoved
+    );
 
-    async function loadActions() {
-      try {
-        const {
-          data: authData,
-          error: authError,
-        } =
-          await supabase.auth
-            .getUser();
+    setLoveCount(
+      initialLoveCount
+    );
 
-        if (authError) {
-          throw authError;
-        }
-
-        const userId =
-          authData.user?.id ??
-          null;
-
-        if (!active) {
-          return;
-        }
-
-        setCurrentUserId(
-          userId
-        );
-
-        if (!userId) {
-          return;
-        }
-
-
-        const [
-          countResult,
-          loveResult,
-          saveResult,
-        ] =
-          await Promise.all([
-            supabase
-              .from(
-                "store_product_likes"
-              )
-              .select(
-                "product_id",
-                {
-                  count: "exact",
-                  head: true,
-                }
-              )
-              .eq(
-                "product_id",
-                product.id
-              ),
-
-            supabase
-              .from(
-                "store_product_likes"
-              )
-              .select(
-                "product_id"
-              )
-              .eq(
-                "user_id",
-                userId
-              )
-              .eq(
-                "product_id",
-                product.id
-              )
-              .maybeSingle(),
-
-            supabase
-              .from(
-                "store_product_saves"
-              )
-              .select(
-                "product_id"
-              )
-              .eq(
-                "user_id",
-                userId
-              )
-              .eq(
-                "product_id",
-                product.id
-              )
-              .maybeSingle(),
-          ]);
-
-
-        if (
-          countResult.error
-        ) {
-          throw countResult.error;
-        }
-
-        if (
-          loveResult.error
-        ) {
-          throw loveResult.error;
-        }
-
-        if (
-          saveResult.error
-        ) {
-          throw saveResult.error;
-        }
-
-        if (!active) {
-          return;
-        }
-
-
-        setLoveCount(
-          countResult.count ??
-            0
-        );
-
-        setIsLoved(
-          Boolean(
-            loveResult.data
-          )
-        );
-
-        setIsSaved(
-          Boolean(
-            saveResult.data
-          )
-        );
-
-      } catch (error) {
-        console.warn(
-          "Aksi kartu produk gagal dimuat:",
-          error
-        );
-      }
-    }
-
-
-    void loadActions();
-
-    return () => {
-      active = false;
-    };
+    setIsSaved(
+      initialIsSaved
+    );
   }, [
     product.id,
+    initialIsLoved,
+    initialLoveCount,
+    initialIsSaved,
   ]);
 
 
@@ -483,7 +362,7 @@ function ProductCard({
           product.title +
           "\n" +
           product.subject +
-          " Â· " +
+          " Ã‚Â· " +
           product.level +
           "\n" +
           "Oleh " +
@@ -568,16 +447,6 @@ function ProductCard({
         </Text>
 
 
-        <Text
-          style={
-            styles.productAuthor
-          }
-          numberOfLines={1}
-        >
-          Oleh {product.author}
-        </Text>
-
-
         <View
           style={
             styles.productFooter
@@ -594,14 +463,7 @@ function ProductCard({
           >
             {product.price}
           </Text>
-        </View>
 
-
-        <View
-          style={
-            styles.cardActions
-          }
-        >
           <View
             style={
               styles.cardRating
@@ -619,13 +481,17 @@ function ProductCard({
                 styles.ratingText
               }
             >
-              {product.reviewCount > 0
-                ? product.rating
-                : "Baru"}
+              {product.rating}
             </Text>
           </View>
+        </View>
 
 
+        <View
+          style={
+            styles.cardActions
+          }
+        >
           <View
             style={
               styles.cardActionIcons
@@ -701,6 +567,21 @@ function ProductCard({
               )}
             </Pressable>
 
+
+            <Pressable
+              style={styles.cardIconButton}
+              onPress={event => {
+                event.stopPropagation();
+                onOpenComments();
+              }}
+              accessibilityLabel="Komentar produk"
+            >
+              <MessageCircle
+                size={18}
+                color="#64748B"
+                strokeWidth={1.8}
+              />
+            </Pressable>
 
             <Pressable
               style={
@@ -935,6 +816,36 @@ function StoreHome() {
   const [products, setProducts] =
     useState<StoreProductCardItem[]>([]);
 
+  const [
+    storeUserId,
+    setStoreUserId,
+  ] =
+    useState<string | null>(
+      null
+    );
+
+  const [
+    productActionState,
+    setProductActionState,
+  ] =
+    useState<
+      Record<
+        string,
+        {
+          loveCount: number;
+          isLoved: boolean;
+          isSaved: boolean;
+        }
+      >
+    >({});
+
+  const storeProductIdsKey =
+    products
+      .map(
+        product => product.id
+      )
+      .join("|");
+
   const [searchQuery, setSearchQuery] =
     useState("");
 
@@ -991,6 +902,327 @@ function StoreHome() {
 
   const [selectedProduct, setSelectedProduct] =
     useState<StoreProductCardItem | null>(null);
+
+  const [previewSession] = useState(createStoreProductPreviewSession);
+  const [firstPagePaths, setFirstPagePaths] =
+    useState<Record<string, string | null>>({});
+  const selectedProductRef = useRef(selectedProduct);
+  selectedProductRef.current = selectedProduct;
+  const storeMountedRef = useRef(true);
+
+  useEffect(() => {
+    storeMountedRef.current = true;
+    return () => { storeMountedRef.current = false; };
+  }, []);
+
+  useEffect(() => {
+    if (selectedProduct) {
+      return;
+    }
+
+    let active = true;
+
+    async function loadStoreActions() {
+      const productIds =
+        storeProductIdsKey
+          ? storeProductIdsKey
+              .split("|")
+              .filter(Boolean)
+          : [];
+
+      if (
+        productIds.length === 0
+      ) {
+        if (
+          active &&
+          storeMountedRef.current
+        ) {
+          setProductActionState(
+            {}
+          );
+        }
+
+        return;
+      }
+
+      try {
+        const {
+          data: sessionData,
+          error: sessionError,
+        } =
+          await supabase.auth
+            .getSession();
+
+        if (sessionError) {
+          throw sessionError;
+        }
+
+        const userId =
+          sessionData.session
+            ?.user.id ??
+          null;
+
+        if (
+          active &&
+          storeMountedRef.current
+        ) {
+          setStoreUserId(
+            userId
+          );
+        }
+
+        /*
+         * Satu query untuk semua like,
+         * bukan satu count query per kartu.
+         */
+        const {
+          data: allLikeRows,
+          error: allLikeError,
+        } =
+          await supabase
+            .from(
+              "store_product_likes"
+            )
+            .select(
+              "product_id"
+            )
+            .in(
+              "product_id",
+              productIds
+            );
+
+        if (allLikeError) {
+          throw allLikeError;
+        }
+
+        let lovedRows:
+          Array<{
+            product_id: string;
+          }> = [];
+
+        let savedRows:
+          Array<{
+            product_id: string;
+          }> = [];
+
+        if (userId) {
+          const [
+            lovedResult,
+            savedResult,
+          ] =
+            await Promise.all([
+              supabase
+                .from(
+                  "store_product_likes"
+                )
+                .select(
+                  "product_id"
+                )
+                .eq(
+                  "user_id",
+                  userId
+                )
+                .in(
+                  "product_id",
+                  productIds
+                ),
+
+              supabase
+                .from(
+                  "store_product_saves"
+                )
+                .select(
+                  "product_id"
+                )
+                .eq(
+                  "user_id",
+                  userId
+                )
+                .in(
+                  "product_id",
+                  productIds
+                ),
+            ]);
+
+          if (
+            lovedResult.error
+          ) {
+            throw lovedResult.error;
+          }
+
+          if (
+            savedResult.error
+          ) {
+            throw savedResult.error;
+          }
+
+          lovedRows =
+            (
+              lovedResult.data ??
+              []
+            ) as Array<{
+              product_id: string;
+            }>;
+
+          savedRows =
+            (
+              savedResult.data ??
+              []
+            ) as Array<{
+              product_id: string;
+            }>;
+        }
+
+        if (
+          !active ||
+          !storeMountedRef.current
+        ) {
+          return;
+        }
+
+        const lovedIds =
+          new Set(
+            lovedRows.map(
+              row =>
+                row.product_id
+            )
+          );
+
+        const savedIds =
+          new Set(
+            savedRows.map(
+              row =>
+                row.product_id
+            )
+          );
+
+        const nextState:
+          Record<
+            string,
+            {
+              loveCount: number;
+              isLoved: boolean;
+              isSaved: boolean;
+            }
+          > = {};
+
+        for (
+          const productId
+          of productIds
+        ) {
+          nextState[
+            productId
+          ] = {
+            loveCount: 0,
+            isLoved:
+              lovedIds.has(
+                productId
+              ),
+            isSaved:
+              savedIds.has(
+                productId
+              ),
+          };
+        }
+
+        for (
+          const row of
+          (
+            allLikeRows ??
+            []
+          ) as Array<{
+            product_id: string;
+          }>
+        ) {
+          const current =
+            nextState[
+              row.product_id
+            ];
+
+          if (current) {
+            current.loveCount +=
+              1;
+          }
+        }
+
+        setProductActionState(
+          nextState
+        );
+
+        console.log(
+          "[STORE_ACTIONS]",
+          JSON.stringify({
+            event:
+              "BATCH_READY",
+            products:
+              productIds.length,
+            networkQueries:
+              userId
+                ? 3
+                : 1,
+          })
+        );
+      }
+      catch (error) {
+        console.warn(
+          "Aksi Store gagal dimuat:",
+          error
+        );
+      }
+    }
+
+    void loadStoreActions();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    storeProductIdsKey,
+    selectedProduct,
+  ]);
+
+  function firstPagePathFor(item: StoreProductCardItem) {
+    return Object.prototype.hasOwnProperty.call(firstPagePaths, item.id)
+      ? firstPagePaths[item.id]
+      : item.firstPageStoragePath;
+  }
+
+  // SIGN_URL_ONLY_NO_IMAGE_PREFETCH: prepare signed URLs only; Detail downloads the visible image.
+  useEffect(() => {
+    if (selectedProduct) return;
+    const candidates = products.map(item => ({
+      id: item.id,
+      path: Object.prototype.hasOwnProperty.call(firstPagePaths, item.id)
+        ? firstPagePaths[item.id] : item.firstPageStoragePath,
+    })).filter(item => Boolean(item.path)).slice(0, 2);
+    for (const item of candidates) {
+      if (item.path) void previewSession.getUrl(item.id, item.path);
+    }
+  }, [products, firstPagePaths, previewSession, selectedProduct]);
+
+  function handleFirstPagesReady(pages: StoreFirstPage[]) {
+    if (!storeMountedRef.current) return;
+    setFirstPagePaths(Object.fromEntries(
+      pages.map(page => [page.id, page.firstPageStoragePath ?? null])
+    ));
+    // Start at product-query completion, before waiting for reviews.
+    const selectedId = selectedProductRef.current?.id;
+    const candidates = pages.filter(page => Boolean(page.firstPageStoragePath))
+      .slice(0, 2);
+    for (const page of candidates) {
+      if (page.firstPageStoragePath && (!selectedId || selectedId === page.id)) {
+        void previewSession.getUrl(page.id, page.firstPageStoragePath);
+      }
+    }
+  }
+
+  const [
+    selectedCommentsProduct,
+    setSelectedCommentsProduct,
+  ] =
+    useState<StoreProductCardItem | null>(
+      null
+    );
   const [
     productOpenedFromProfile,
     setProductOpenedFromProfile,
@@ -1032,6 +1264,11 @@ function StoreHome() {
     );
 
     setSelectedProduct(
+      null
+    );
+
+
+    setSelectedCommentsProduct(
       null
     );
 
@@ -1096,6 +1333,14 @@ function StoreHome() {
           setEditingProductId(null);
           return true;
         }
+
+        if (selectedCommentsProduct) {
+          setSelectedCommentsProduct(
+            null
+          );
+          return true;
+        }
+
         if (selectedProduct) {
           setSelectedProduct(null);
 
@@ -1155,7 +1400,7 @@ function StoreHome() {
     return () => {
       subscription.remove();
     };
-  }, [selectedConversationId, editingProductId, selectedProduct, selectedProfileUserId, profileReturnProduct, productOpenedFromProfile, showChatInbox, showNotifications, showProfile, showUpload]);
+  }, [selectedConversationId, editingProductId, selectedCommentsProduct, selectedProduct, selectedProfileUserId, profileReturnProduct, productOpenedFromProfile, showChatInbox, showNotifications, showProfile, showUpload]);
 
 
   async function loadProducts(
@@ -1170,6 +1415,10 @@ function StoreHome() {
 
       const cachedProducts =
         await readStoreProductsCache();
+      logA4("STORE_CACHE", "store", {
+        count: cachedProducts?.length ?? 0,
+        withPath: cachedProducts?.filter(item => Boolean(item.firstPageStoragePath)).length ?? 0,
+      });
 
       if (
         cachedProducts &&
@@ -1189,7 +1438,7 @@ function StoreHome() {
 
     try {
       const mappedProducts =
-        await fetchPublishedStoreProducts();
+        await fetchPublishedStoreProducts(handleFirstPagesReady);
 
       setProducts(
         mappedProducts
@@ -1403,10 +1652,36 @@ function StoreHome() {
     );
   }
 
+  if (selectedCommentsProduct) {
+    return (
+      <ProductCommentsScreen
+        productId={
+          selectedCommentsProduct.id
+        }
+        creatorUserId={
+          selectedCommentsProduct.creatorUserId
+        }
+        productTitle={
+          selectedCommentsProduct.title
+        }
+        onBack={() =>
+          setSelectedCommentsProduct(
+            null
+          )
+        }
+      />
+    );
+  }
+
   if (selectedProduct) {
     return (
       <ProductDetailScreen
-        product={selectedProduct}
+        key={selectedProduct.id}
+        product={{
+          ...selectedProduct,
+          firstPageStoragePath: firstPagePathFor(selectedProduct),
+        }}
+        previewSession={previewSession}
 
         onOpenCreatorProfile={(
           creatorUserId
@@ -1666,9 +1941,43 @@ function StoreHome() {
                   <ProductCard
                     key={product.id}
                     product={product}
-                    onPress={() =>
-                      setSelectedProduct(product)
+                    currentUserId={
+                      storeUserId
                     }
+                    initialIsLoved={
+                      productActionState[
+                        product.id
+                      ]?.isLoved ??
+                      false
+                    }
+                    initialLoveCount={
+                      productActionState[
+                        product.id
+                      ]?.loveCount ??
+                      0
+                    }
+                    initialIsSaved={
+                      productActionState[
+                        product.id
+                      ]?.isSaved ??
+                      false
+                    }
+                    onOpenComments={() =>
+                      setSelectedCommentsProduct(
+                        product
+                      )
+                    }
+                    onPress={() => {
+                      logA4("TAP", product.id, {
+                        urlReady: Boolean(previewSession.peek(
+                          product.id, firstPagePathFor(product)
+                        )),
+                      });
+
+                      setSelectedProduct(
+                        product
+                      );
+                    }}
                   />
                 )
               )}
@@ -1734,7 +2043,13 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      {session ? <StoreHome /> : <AuthScreen />}
+      {session ? (
+        <StoreHome
+          key={session.user.id}
+        />
+      ) : (
+        <AuthScreen />
+      )}
     </SafeAreaProvider>
   );
 }
@@ -1866,7 +2181,7 @@ const styles = StyleSheet.create({
 
   thumbnail: {
     width: "100%",
-    aspectRatio: 4 / 5,
+    aspectRatio: 1 / 1,
     backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
@@ -1917,10 +2232,10 @@ const styles = StyleSheet.create({
   },
 
   productFooter: {
-    marginTop: 1,
+    marginTop: 3,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-end",
+    justifyContent: "space-between",
   },
 
   ratingRow: {
@@ -1937,7 +2252,7 @@ const styles = StyleSheet.create({
 
   price: {
     flexShrink: 1,
-    textAlign: "right",
+    textAlign: "left",
     fontSize: 9.5,
     fontFamily: "PlusJakartaSans_700Bold",
     color: "#0F172A",

@@ -1,11 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Image,
+  Platform,
   Modal,
   Pressable,
   ScrollView,
+  useWindowDimensions,
 
   StatusBar,
   StyleSheet,
@@ -13,8 +15,8 @@ import {
   View,
 } from "react-native";
 import {
+  Download,
   ArrowLeft,
-  BookOpen,
   Bookmark,
   Heart,
   MessageCircle,
@@ -23,11 +25,19 @@ import {
   ShieldCheck,
   Trash2,
   Star,
+  ShoppingCart,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
+import CheckoutScreen from "./CheckoutScreen";
+import ReactNativeBlobUtil from "react-native-blob-util";
 import { supabase } from "../lib/supabase";
-import ProductReviewsSection from "./ProductReviewsSection";
+
+import {
+  createStoreProductPreviewSession,
+  logA4,
+  type StoreProductPreviewSession,
+} from "../lib/storeProductPreview";
 
 type ProductSummary = {
   id: string;
@@ -41,6 +51,8 @@ type ProductSummary = {
   reviewCount: number;
   price: string;
   thumbnailUrl: string | null;
+  firstPageStoragePath?: string | null;
+  pageCount?: number;
   downloadCount: number;
 };
 
@@ -57,11 +69,18 @@ type ProductDetailRow = {
   original_price_amount: number | null;
   description: string | null;
   thumbnail_path: string | null;
+  file_path: string | null;
   download_count: number | null;
+};
+
+type ProductPageRow = {
+  page_number: number;
+  storage_path: string;
 };
 
 type Props = {
   product: ProductSummary;
+  previewSession?: StoreProductPreviewSession;
   onBack: () => void;
   onEditProduct: () => void;
   onProductChanged: () => void;
@@ -76,12 +95,69 @@ type Props = {
 
 export default function ProductDetailScreen({
   product,
+  previewSession,
   onBack,
   onEditProduct,
   onProductChanged,
   onOpenChat,
   onOpenCreatorProfile,
 }: Props) {
+  const { width: viewportWidth } =
+    useWindowDimensions();
+
+  const [localPreviewSession] = useState(createStoreProductPreviewSession);
+  const pagePreview = previewSession ?? localPreviewSession;
+  const openedAtRef = useRef(Date.now());
+  const imageStartedRef = useRef(new Map<string, number>());
+  const sourceUrlsRef = useRef<Array<string | null>>([]);
+  const [firstImageSettledUrl, setFirstImageSettledUrl] = useState<string | null>(null);
+  const [productPageUrls, setProductPageUrls] = useState<Array<string | null>>(() => {
+    const cached = pagePreview.peek(product.id, product.firstPageStoragePath);
+    return cached ? [cached] : [];
+  });
+
+  useEffect(() => {
+    logA4("DETAIL_MOUNT", product.id);
+  }, [product.id]);
+
+  useEffect(() => {
+    let active = true;
+    const path = product.firstPageStoragePath;
+    if (path) {
+      // Join an in-flight Store sign, or reuse its URL. No page-1 DB query.
+      void pagePreview.getUrl(product.id, path).then(url => {
+        if (!active || !url) return;
+        setProductPageUrls(current => current[0] === url
+          ? current : [url, ...current.slice(1)]);
+      });
+    }
+    return () => { active = false; };
+  }, [product.id, product.firstPageStoragePath, pagePreview]);
+
+  useEffect(() => {
+    productPageUrls.forEach((url, index) => {
+      if (url && url !== sourceUrlsRef.current[index]) {
+        logA4("SOURCE_SET", product.id, {
+          page: index + 1,
+          sinceMountMs: Date.now() - openedAtRef.current,
+          replaced: Boolean(sourceUrlsRef.current[index]),
+        });
+      }
+    });
+    sourceUrlsRef.current = productPageUrls;
+  }, [product.id, productPageUrls]);
+
+  const [
+    activeProductSlide,
+    setActiveProductSlide,
+  ] = useState(0);
+
+  const [
+    showCheckout,
+    setShowCheckout,
+  ] =
+    useState(false);
+
   const [detail, setDetail] =
     useState<ProductDetailRow | null>(null);
 
@@ -108,6 +184,13 @@ export default function ProductDetailScreen({
     setDeleteConfirmVisible,
   ] = useState(false);
 
+  // DOWNLOAD_SUCCESS_DIGINAZ_MODAL_STATE
+  const [
+    downloadSuccessFileName,
+    setDownloadSuccessFileName,
+  ] = useState<string | null>(null);
+
+
   const [
     isLoved,
     setIsLoved,
@@ -133,12 +216,44 @@ export default function ProductDetailScreen({
     setSaveLoading,
   ] = useState(false);
 
+  const [
+    hasProductAccess,
+    setHasProductAccess,
+  ] = useState(false);
+
+  const [
+    productAccessLoading,
+    setProductAccessLoading,
+  ] = useState(false);
+
   useEffect(() => {
     let active = true;
 
     async function loadDetail() {
       setLoading(true);
       setErrorMessage("");
+      setActiveProductSlide(0);
+
+      const pagesStarted = Date.now();
+      logA4("PAGES_QUERY_START", product.id);
+
+      const pagesPromise = Promise.resolve(
+        supabase
+          .from("store_product_pages")
+          .select(
+            "page_number,storage_path"
+          )
+          .eq(
+            "product_id",
+            product.id
+          )
+          .order(
+            "page_number",
+            {
+              ascending: true,
+            }
+          )
+      );
 
       try {
         const {
@@ -149,13 +264,55 @@ export default function ProductDetailScreen({
 
         setCurrentUserId(user?.id ?? null);
 
+        if (user?.id) {
+          const {
+            data: accessData,
+            error: accessError,
+          } =
+            await supabase
+              .from(
+                "store_product_access"
+              )
+              .select("id")
+              .eq(
+                "user_id",
+                user.id
+              )
+              .eq(
+                "product_id",
+                product.id
+              )
+              .maybeSingle();
+
+          if (accessError) {
+            console.warn(
+              "Cek akses produk gagal:",
+              accessError
+            );
+
+            setHasProductAccess(
+              false
+            );
+          } else {
+            setHasProductAccess(
+              Boolean(
+                accessData?.id
+              )
+            );
+          }
+        } else {
+          setHasProductAccess(
+            false
+          );
+        }
+
         const {
           data,
           error,
         } = await supabase
           .from("store_products")
           .select(
-            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,download_count"
+            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,file_path,download_count"
           )
           .eq("id", product.id)
           .single();
@@ -169,6 +326,55 @@ export default function ProductDetailScreen({
         setDetail(
           data as unknown as ProductDetailRow
         );
+
+        /*
+         * Data utama produk sudah siap.
+         * Jangan tahan seluruh halaman hanya karena
+         * gallery masih menyiapkan signed URL/gambar.
+         */
+        setLoading(false);
+
+        const {
+          data: pageRows,
+          error: pageRowsError,
+        } = await pagesPromise;
+
+        logA4("PAGES_QUERY_DONE", product.id, {
+          ms: Date.now() - pagesStarted, ok: !pageRowsError,
+          count: pageRows?.length ?? 0,
+        });
+        if (!active) return;
+
+        if (pageRowsError) {
+          // A background metadata failure must not erase a ready first image.
+          console.warn("Halaman produk gagal dimuat:", pageRowsError);
+        } else {
+          const pages = (pageRows ?? []) as ProductPageRow[];
+          if (pages.length > 0) {
+            const firstPageUrl = await pagePreview.getUrl(
+              product.id, pages[0].storage_path, pages[0].page_number
+            );
+            if (!active) return;
+            setProductPageUrls(current => [
+              firstPageUrl ?? current[0] ?? null,
+              ...pages.slice(1).map(() => null),
+            ]);
+
+            // Preserve each page's slot even if a signing request fails.
+            await Promise.all(pages.slice(1).map(async (page, index) => {
+              const url = await pagePreview.getUrl(
+                product.id, page.storage_path, page.page_number
+              );
+              if (!active || !url) return;
+              setProductPageUrls(current => {
+                const next = [...current];
+                next[index + 1] = url;
+                return next;
+              });
+            }));
+            // Image loads pages 2+ after the first image settles. No second prefetch.
+          }
+        }
       } catch (error) {
         if (!active) return;
 
@@ -189,12 +395,24 @@ export default function ProductDetailScreen({
     return () => {
       active = false;
     };
-  }, [product.id]);
+  }, [product.id, pagePreview]);
 
   const isOwner =
     currentUserId === product.creatorUserId;
 
+  // TEMPORARY_CHECKOUT_TEST
+  // Hanya untuk menguji checkout produk berbayar
+  // milik akun sendiri. isOwner tetap asli.
+  const forceBuyerCheckoutPreview =
+    isOwner &&
+    product.price !== "Gratis";
 
+  const canDownloadProduct =
+    product.price === "Gratis" ||
+    (
+      !forceBuyerCheckoutPreview &&
+      (isOwner || hasProductAccess)
+    );
   useEffect(() => {
     let active = true;
 
@@ -771,6 +989,532 @@ export default function ProductDetailScreen({
 
 
 
+  // OPEN_DOWNLOAD_FOLDER_HELPER
+  async function openDownloadFolder() {
+    if (Platform.OS !== "android") {
+      return;
+    }
+
+    const targets = [
+      {
+        uri:
+          "content://com.android.externalstorage.documents/document/primary%3ADownload",
+        mime:
+          "vnd.android.document/directory",
+      },
+      {
+        uri:
+          "content://com.android.externalstorage.documents/document/primary%3ADownload",
+        mime:
+          "resource/folder",
+      },
+      {
+        uri:
+          "content://com.android.providers.downloads.documents/root/downloads",
+        mime:
+          "vnd.android.document/directory",
+      },
+      {
+        uri:
+          "content://com.android.providers.downloads.documents/root/downloads",
+        mime:
+          "resource/folder",
+      },
+    ];
+
+    let lastError: unknown = null;
+
+    for (const target of targets) {
+      try {
+        await ReactNativeBlobUtil.android
+          .actionViewIntent(
+            target.uri,
+            target.mime
+          );
+
+        console.log(
+          "[DOWNLOAD]",
+          JSON.stringify({
+            event:
+              "DOWNLOAD_FOLDER_OPENED",
+            uri:
+              target.uri,
+            mime:
+              target.mime,
+          })
+        );
+
+        return;
+      }
+      catch (error) {
+        lastError = error;
+      }
+    }
+
+    /*
+     * Tidak munculkan popup kedua.
+     * Jika file manager perangkat tidak menerima intent,
+     * cukup catat di log.
+     */
+    console.warn(
+      "Folder Download tidak dapat dibuka otomatis:",
+      lastError
+    );
+  }
+
+
+  async function openOwnedProduct(
+    skipLoadingGuard = false
+  ) {
+    if (
+      (!skipLoadingGuard &&
+        productAccessLoading) ||
+      !detail?.file_path
+    ) {
+      if (!detail?.file_path) {
+        Alert.alert(
+          "File belum tersedia",
+          "File produk belum tersedia untuk diunduh."
+        );
+      }
+
+      return;
+    }
+
+    setProductAccessLoading(true);
+
+    try {
+      const {
+        data,
+        error,
+      } =
+        await supabase.storage
+          .from(
+            "store-product-files"
+          )
+          .createSignedUrl(
+            detail.file_path,
+            300
+          );
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data?.signedUrl) {
+        throw new Error(
+          "Signed URL tidak tersedia."
+        );
+      }
+
+      const originalName =
+        detail.file_path
+          .split("/")
+          .pop()
+          ?.trim() ||
+        "produk-diginaz";
+
+      const originalExtension =
+        originalName.includes(".")
+          ? originalName
+              .split(".")
+              .pop()
+              ?.trim()
+              .toLowerCase() ?? ""
+          : "";
+
+      const extensionSuffix =
+        originalExtension
+          ? "." + originalExtension
+          : "";
+
+      const rawProductTitle =
+        product.title.trim() ||
+        "Produk Diginaz";
+
+      const titleWithoutExtension =
+        extensionSuffix &&
+        rawProductTitle
+          .toLowerCase()
+          .endsWith(
+            extensionSuffix.toLowerCase()
+          )
+          ? rawProductTitle.slice(
+              0,
+              -extensionSuffix.length
+            )
+          : rawProductTitle;
+
+      const safeTitle =
+        titleWithoutExtension
+          .replace(
+            /[<>:"/\\|?*\x00-\x1F]/g,
+            "_"
+          )
+          .replace(
+            /\s+/g,
+            " "
+          )
+          .replace(
+            /[. ]+$/g,
+            ""
+          )
+          .slice(
+            0,
+            120
+          ) ||
+        "Produk Diginaz";
+
+      const safeName =
+        safeTitle +
+        extensionSuffix;
+
+      const extension =
+        safeName
+          .split(".")
+          .pop()
+          ?.toLowerCase() ?? "";
+
+      const mimeByExtension = {
+        pdf: "application/pdf",
+        doc: "application/msword",
+        docx:
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ppt: "application/vnd.ms-powerpoint",
+        pptx:
+          "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        xls: "application/vnd.ms-excel",
+        xlsx:
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        zip: "application/zip",
+        jpg: "image/jpeg",
+        jpeg: "image/jpeg",
+        png: "image/png",
+      };
+
+      const mime =
+        mimeByExtension[
+          extension as keyof typeof mimeByExtension
+        ] ??
+        "application/octet-stream";
+
+      if (Platform.OS === "android") {
+        /*
+         * Android 10+ menggunakan scoped storage.
+         * Download file ke cache aplikasi lebih dulu,
+         * lalu salin ke MediaStore collection Download.
+         *
+         * Jangan menggunakan fs.dirs.DownloadDir sebagai
+         * tujuan DownloadManager karena pada perangkat
+         * tertentu nilainya mengarah ke Android/data/...,
+         * yang ditolak MediaProvider.
+         */
+        if (
+          Number(
+            Platform.Version
+          ) >= 29
+        ) {
+          const downloadResult =
+            await ReactNativeBlobUtil
+              .config({
+                fileCache: true,
+              })
+              .fetch(
+                "GET",
+                data.signedUrl
+              );
+
+          const temporaryPath =
+            downloadResult.path();
+
+          try {
+            const mediaUri =
+              await ReactNativeBlobUtil
+                .MediaCollection
+                .copyToMediaStore(
+                  {
+                    name: safeName,
+                    parentFolder: "",
+                    mimeType: mime,
+                  },
+                  "Download",
+                  temporaryPath
+                );
+
+            if (!mediaUri) {
+              throw new Error(
+                "File gagal disimpan ke folder Download."
+              );
+            }
+
+            console.log(
+              "[DOWNLOAD]",
+              JSON.stringify({
+                event:
+                  "MEDIASTORE_SAVED",
+                name:
+                  safeName,
+                uri:
+                  mediaUri,
+              })
+            );
+
+            setDownloadSuccessFileName(safeName);
+          }
+          finally {
+            try {
+              const exists =
+                await ReactNativeBlobUtil
+                  .fs
+                  .exists(
+                    temporaryPath
+                  );
+
+              if (exists) {
+                await ReactNativeBlobUtil
+                  .fs
+                  .unlink(
+                    temporaryPath
+                  );
+              }
+            }
+            catch (
+              cleanupError
+            ) {
+              console.warn(
+                "File sementara download gagal dibersihkan:",
+                cleanupError
+              );
+            }
+          }
+
+          return;
+        }
+
+        /*
+         * Fallback Android lama (< 10).
+         */
+        const targetPath =
+          ReactNativeBlobUtil.fs.dirs.DownloadDir +
+          "/" +
+          safeName;
+
+        await ReactNativeBlobUtil
+          .config({
+            addAndroidDownloads: {
+              useDownloadManager: true,
+              notification: true,
+              mediaScannable: true,
+              title: safeName,
+              description:
+                "Mengunduh " +
+                product.title,
+              mime,
+              path: targetPath,
+            },
+          })
+          .fetch(
+            "GET",
+            data.signedUrl
+          );
+
+        setDownloadSuccessFileName(safeName);
+
+        return;
+      }
+
+      const targetPath =
+        ReactNativeBlobUtil.fs.dirs.DocumentDir +
+        "/" +
+        safeName;
+
+      await ReactNativeBlobUtil
+        .config({
+          path: targetPath,
+          fileCache: true,
+        })
+        .fetch(
+          "GET",
+          data.signedUrl
+        );
+
+      Alert.alert(
+        "Unduhan selesai",
+        "File telah disimpan di perangkat."
+      );
+    }
+    catch (error) {
+      console.error(
+        "Unduh produk gagal:",
+        error
+      );
+
+      Alert.alert(
+        "Belum dapat mengunduh produk",
+        error instanceof Error
+          ? error.message
+          : "Silakan coba lagi."
+      );
+    }
+    finally {
+      setProductAccessLoading(
+        false
+      );
+    }
+  }
+
+  async function handlePrimaryProductAction() {
+    if (productAccessLoading) {
+      return;
+    }
+
+    if (
+      isOwner &&
+      !forceBuyerCheckoutPreview
+    ) {
+      await openOwnedProduct();
+      return;
+    }
+
+    if (
+      hasProductAccess &&
+      !forceBuyerCheckoutPreview
+    ) {
+      await openOwnedProduct();
+      return;
+    }
+
+    if (product.price === "Gratis") {
+      const {
+        data: { session: activeSession },
+        error: activeSessionError,
+      } = await supabase.auth.getSession();
+
+      if (activeSessionError) {
+        console.warn(
+          "Baca sesi download gagal:",
+          activeSessionError
+        );
+      }
+
+      const effectiveCurrentUserId =
+        activeSession?.user?.id ?? null;
+
+      if (
+        effectiveCurrentUserId &&
+        effectiveCurrentUserId !== currentUserId
+      ) {
+        setCurrentUserId(
+          effectiveCurrentUserId
+        );
+      }
+
+      console.log(
+        "[DOWNLOAD_AUTH]",
+        JSON.stringify({
+          event: "SESSION_RESOLVED",
+          authenticated:
+            Boolean(effectiveCurrentUserId),
+          productId:
+            product.id,
+        })
+      );
+
+      if (!effectiveCurrentUserId) {
+        Alert.alert(
+          "Login diperlukan",
+          "Silakan login terlebih dahulu."
+        );
+
+        return;
+      }
+
+      setProductAccessLoading(
+        true
+      );
+
+      try {
+        const {
+          error,
+        } =
+          await supabase.rpc(
+            "claim_free_store_product",
+            {
+              target_product_id:
+                product.id,
+            }
+          );
+
+        if (error) {
+          throw error;
+        }
+
+        setHasProductAccess(
+          true
+        );
+
+        await openOwnedProduct(
+          true
+        );
+      }
+      catch (error) {
+        console.error(
+          "Dapatkan produk gratis gagal:",
+          error
+        );
+
+        Alert.alert(
+          "Belum dapat mengambil produk",
+          error instanceof Error
+            ? error.message
+            : "Silakan coba lagi."
+        );
+      }
+      finally {
+        setProductAccessLoading(
+          false
+        );
+      }
+
+      return;
+    }
+
+    setShowCheckout(true);
+  }
+
+  /*
+   * Cover 1:1 hanya untuk kartu Store.
+   * Detail Produk hanya memakai halaman produk.
+   */
+  const productSlides =
+    productPageUrls;
+
+  // PAGE_COUNT_EARLY_COUNTER
+  // Total halaman berasal dari metadata Store, bukan dari jumlah URL
+  // yang sudah selesai disiapkan.
+  const productPageCount =
+    Math.max(
+      Number(product.pageCount ?? 0),
+      productSlides.length
+    );
+
+  const productGalleryWidth =
+    Math.max(
+      viewportWidth,
+      1
+    );
+
+  if (showCheckout) {
+    return (
+      <CheckoutScreen
+        product={product}
+        onBack={() =>
+          setShowCheckout(false)
+        }
+      />
+    );
+  }
+
   return (
     <SafeAreaView
       style={styles.safeArea}
@@ -848,18 +1592,7 @@ export default function ProductDetailScreen({
 
       </View>
 
-      {loading ? (
-        <View style={styles.centerState}>
-          <ActivityIndicator
-            size="small"
-            color="#2563EB"
-          />
-
-          <Text style={styles.stateText}>
-            Memuat detail produk...
-          </Text>
-        </View>
-      ) : errorMessage ? (
+      {errorMessage && !detail ? (
         <View style={styles.centerState}>
           <Text style={styles.errorText}>
             Detail produk belum dapat dimuat.
@@ -878,35 +1611,147 @@ export default function ProductDetailScreen({
         </View>
       ) : (
         <ScrollView
+          style={styles.detailScroll}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={
             styles.content
           }
         >
-          <View style={styles.thumbnail}>
-            {product.thumbnailUrl ? (
-              <Image
-                source={{
-                  uri: product.thumbnailUrl,
+          <View
+            style={styles.productGallery}
+          >
+            {productSlides.length > 0 ? (
+              <ScrollView
+                horizontal
+                pagingEnabled
+                nestedScrollEnabled
+                showsHorizontalScrollIndicator={
+                  false
+                }
+                decelerationRate="fast"
+                onMomentumScrollEnd={(
+                  event
+                ) => {
+                  const nextIndex =
+                    Math.round(
+                      event.nativeEvent
+                        .contentOffset.x /
+                        productGalleryWidth
+                    );
+
+                  setActiveProductSlide(
+                    Math.max(
+                      0,
+                      Math.min(
+                        nextIndex,
+                        productSlides.length -
+                          1
+                      )
+                    )
+                  );
                 }}
-                style={styles.thumbnailImage}
-                resizeMode="cover"
-              />
+              >
+                {productSlides.map(
+                  (
+                    imageUrl,
+                    index
+                  ) => (
+                    <View
+                      key={`${product.id}-page-${index}`}
+                      style={[
+                        styles.productSlide,
+                        {
+                          width:
+                            productGalleryWidth,
+                        },
+                      ]}
+                    >
+                      {imageUrl && (
+                        /* GALLERY_LAZY_NEXT_PAGE */
+                        index <= activeProductSlide ||
+                        (
+                          firstImageSettledUrl === productSlides[0] &&
+                          index === activeProductSlide + 1
+                        )
+                      ) ? (
+                        <Image
+                          source={{ uri: imageUrl }}
+                          style={styles.thumbnailImage}
+                          resizeMode="contain"
+                          onLoadStart={() => {
+                            imageStartedRef.current.set(imageUrl, Date.now());
+                            logA4("IMAGE_START", product.id, { page: index + 1 });
+                          }}
+                          onLoad={() => {
+                            const started = imageStartedRef.current.get(imageUrl);
+                            logA4("IMAGE_LOADED", product.id, {
+                              page: index + 1,
+                              imageMs: started === undefined ? -1 : Date.now() - started,
+                              sinceMountMs: Date.now() - openedAtRef.current,
+                            });
+                            if (index === 0) setFirstImageSettledUrl(imageUrl);
+                          }}
+                          onError={() => {
+                            logA4("IMAGE_ERROR", product.id, {
+                              page: index + 1,
+                              sinceMountMs: Date.now() - openedAtRef.current,
+                            });
+                            if (index === 0) setFirstImageSettledUrl(imageUrl);
+                          }}
+                        />
+                      ) : null}
+                    </View>
+                  )
+                )}
+              </ScrollView>
             ) : (
-              <BookOpen
-                size={48}
-                color="#8FA8D8"
-                strokeWidth={1.4}
-              />
+              <View
+                style={[
+                  styles.productSlide,
+                  {
+                    width:
+                      productGalleryWidth,
+                  },
+                ]}
+              >
+                <ActivityIndicator
+                  size="small"
+                  color="#2563EB"
+                  accessibilityLabel="Menyiapkan halaman produk"
+                />
+              </View>
             )}
 
-            <View style={styles.typeBadge}>
+            <View
+              style={styles.typeBadge}
+            >
               <Text
-                style={styles.typeBadgeText}
+                style={
+                  styles.typeBadgeText
+                }
               >
                 {product.type}
               </Text>
             </View>
+
+            {productPageCount > 1 ? (
+              <View
+                style={
+                  styles.slideCounter
+                }
+              >
+                <Text
+                  style={
+                    styles.slideCounterText
+                  }
+                >
+                  {activeProductSlide +
+                    1}
+                  {" / "}
+                  {productPageCount}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.mainInfo}>
@@ -1222,15 +2067,266 @@ export default function ProductDetailScreen({
             </View>
           </View>
 
-          <ProductReviewsSection
-            productId={product.id}
-            creatorUserId={
-              product.creatorUserId
+        </ScrollView>
+      )}
+
+      <View style={styles.detailPurchaseBar}>
+        {canDownloadProduct ? (
+          <Pressable
+            style={[
+              styles.detailPrimaryButton,
+              productAccessLoading &&
+                styles.detailPrimaryButtonDisabled,
+            ]}
+            onPress={
+              handlePrimaryProductAction
+            }
+            disabled={
+              productAccessLoading
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Unduh produk"
+          >
+            <View
+              style={
+                styles.detailActionContent
+              }
+            >
+              <Download
+                size={20}
+                color="#FFFFFF"
+                strokeWidth={2}
+              />
+
+              <Text
+                style={
+                  styles.detailPrimaryButtonText
+                }
+              >
+                {productAccessLoading
+                  ? "Memproses..."
+                  : "Unduh"}
+              </Text>
+            </View>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={[
+              styles.detailPrimaryButton,
+              productAccessLoading &&
+                styles.detailPrimaryButtonDisabled,
+            ]}
+            onPress={
+              handlePrimaryProductAction
+            }
+            disabled={
+              productAccessLoading
+            }
+            accessibilityRole="button"
+            accessibilityLabel="Beli produk sekarang"
+          >
+            <View
+              style={
+                styles.detailActionContent
+              }
+            >
+              <ShoppingCart
+                size={20}
+                color="#FFFFFF"
+                strokeWidth={2}
+              />
+
+              <Text
+                style={
+                  styles.detailPrimaryButtonText
+                }
+              >
+                Beli Sekarang
+              </Text>
+            </View>
+
+            <Text
+              style={
+                styles.detailPrimaryButtonPrice
+              }
+            >
+              {product.price}
+            </Text>
+          </Pressable>
+        )}
+      </View>
+
+      {/* DOWNLOAD_SUCCESS_DIGINAZ_MODAL_UI */}
+      <Modal
+        visible={
+          Boolean(
+            downloadSuccessFileName
+          )
+        }
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() =>
+          setDownloadSuccessFileName(
+            null
+          )
+        }
+      >
+        <View
+          style={
+            styles.deleteModalRoot
+          }
+        >
+          <Pressable
+            style={
+              styles.deleteModalBackdrop
+            }
+            onPress={() =>
+              setDownloadSuccessFileName(
+                null
+              )
             }
           />
 
-        </ScrollView>
-      )}
+          <View
+            style={
+              styles.deleteModalCard
+            }
+          >
+            <View
+              style={[
+                styles.deleteModalIcon,
+                {
+                  backgroundColor:
+                    "#EFF6FF",
+                },
+              ]}
+            >
+              <Download
+                size={23}
+                color="#2563EB"
+                strokeWidth={1.9}
+              />
+            </View>
+
+            <Text
+              style={
+                styles.deleteModalTitle
+              }
+            >
+              Download berhasil
+            </Text>
+
+            <Text
+              style={
+                styles.deleteModalDescription
+              }
+            >
+              File sudah tersimpan di perangkat Anda.
+            </Text>
+
+            <View
+              style={
+                styles.deleteModalProduct
+              }
+            >
+              <Text
+                style={
+                  styles.deleteModalProductLabel
+                }
+              >
+                FILE
+              </Text>
+
+              <Text
+                style={
+                  styles.deleteModalProductTitle
+                }
+                numberOfLines={2}
+              >
+                {
+                  downloadSuccessFileName
+                }
+              </Text>
+
+              <Text
+                style={[
+                  styles.deleteModalProductLabel,
+                  {
+                    marginTop: 9,
+                  },
+                ]}
+              >
+                DISIMPAN DI
+              </Text>
+
+              <Text
+                style={
+                  styles.deleteModalProductTitle
+                }
+              >
+                Penyimpanan internal › Download
+              </Text>
+            </View>
+
+            <View
+              style={
+                styles.deleteModalActions
+              }
+            >
+              <Pressable
+                style={
+                  styles.deleteModalCancelButton
+                }
+                onPress={() =>
+                  setDownloadSuccessFileName(
+                    null
+                  )
+                }
+              >
+                <Text
+                  style={
+                    styles.deleteModalCancelText
+                  }
+                >
+                  Tutup
+                </Text>
+              </Pressable>
+
+              <Pressable
+                style={[
+                  styles.deleteModalDeleteButton,
+                  {
+                    backgroundColor:
+                      "#2563EB",
+                  },
+                ]}
+                onPress={() => {
+                  setDownloadSuccessFileName(
+                    null
+                  );
+
+                  void openDownloadFolder();
+                }}
+              >
+                <Download
+                  size={16}
+                  color="#FFFFFF"
+                  strokeWidth={1.9}
+                />
+
+                <Text
+                  style={
+                    styles.deleteModalDeleteText
+                  }
+                >
+                  Lihat
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={deleteConfirmVisible}
@@ -1441,14 +2537,108 @@ const styles = StyleSheet.create({
     color: "#2563EB",
   },
 
+  detailScroll: {
+    flex: 1,
+  },
+
+  detailPurchaseBar: {
+    minHeight: 72,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 9,
+    paddingBottom: 9,
+    borderTopWidth:
+      StyleSheet.hairlineWidth,
+    borderTopColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+  },
+
+  detailPurchaseSideAction: {
+    width: 52,
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  detailPurchaseSideActionText: {
+    marginTop: 2,
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 10.5,
+    lineHeight: 14,
+    color: "#0F172A",
+  },
+
+  detailCartButton: {
+    width: 58,
+    minHeight: 52,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EFF6FF",
+  },
+
+  detailPrimaryButton: {
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#2563EB",
+  },
+
+  detailFreeButton: {
+    backgroundColor: "#2563EB",
+  },
+
+  detailPrimaryButtonDisabled: {
+    opacity: 0.6,
+  },
+
+  detailActionContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+
+  detailPrimaryButtonText: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 14.5,
+    lineHeight: 19,
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
+
+  detailPrimaryButtonPrice: {
+    marginTop: 1,
+    fontFamily:
+      "PlusJakartaSans_500Medium",
+    fontSize: 10.5,
+    lineHeight: 14,
+    color:
+      "rgba(255,255,255,0.88)",
+    textAlign: "center",
+  },
+
   content: {
     paddingBottom: 40,
   },
 
-  thumbnail: {
+  productGallery: {
     width: "100%",
-    aspectRatio: 4 / 5,
-    maxHeight: 430,
+    backgroundColor: "#EFF6FF",
+    position: "relative",
+    overflow: "hidden",
+  },
+
+  productSlide: {
+    aspectRatio: 210 / 297,
     backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
@@ -1477,6 +2667,27 @@ const styles = StyleSheet.create({
     color: "#2563EB",
   },
 
+  slideCounter: {
+    position: "absolute",
+    right: 14,
+    bottom: 14,
+    minWidth: 42,
+    height: 26,
+    paddingHorizontal: 9,
+    borderRadius: 13,
+    backgroundColor:
+      "rgba(15, 23, 42, 0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  slideCounterText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 10,
+    color: "#FFFFFF",
+  },
+
   mainInfo: {
     paddingHorizontal: 16,
     paddingTop: 14,
@@ -1487,8 +2698,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontFamily:
       "PlusJakartaSans_700Bold",
-    fontSize: 23,
-    lineHeight: 29,
+    fontSize: 14,
+    lineHeight: 20,
     color: "#0F172A",
   },
 
@@ -1657,7 +2868,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontFamily:
       "PlusJakartaSans_700Bold",
-    fontSize: 14,
+    fontSize: 12,
     color: "#0F172A",
   },
 
@@ -1665,8 +2876,8 @@ const styles = StyleSheet.create({
     marginTop: 5,
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 12,
+    lineHeight: 18,
     color: "#475569",
   },
 
@@ -1684,7 +2895,7 @@ const styles = StyleSheet.create({
   infoLabel: {
     fontFamily:
       "PlusJakartaSans_400Regular",
-    fontSize: 14,
+    fontSize: 12,
     color: "#94A3B8",
   },
 
@@ -1693,7 +2904,7 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontFamily:
       "PlusJakartaSans_600SemiBold",
-    fontSize: 14,
+    fontSize: 12,
     color: "#334155",
   },
   ownerActions: {

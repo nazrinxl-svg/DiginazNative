@@ -1,4 +1,10 @@
 import { supabase } from "./supabase";
+import { logA4 } from "./storeProductPreview";
+
+export type StoreFirstPage = {
+  id: string;
+  firstPageStoragePath: string | null;
+};
 
 export type StoreProductCardItem = {
   id: string;
@@ -12,6 +18,15 @@ export type StoreProductCardItem = {
   reviewCount: number;
   price: string;
   thumbnailUrl: string | null;
+
+  /*
+   * Path halaman A4 pertama.
+   * Path saja, bukan signed URL,
+   * sehingga aman disimpan di cache Store.
+   */
+  firstPageStoragePath?: string | null;
+
+  pageCount: number;
   downloadCount: number;
 };
 
@@ -28,6 +43,11 @@ export type StoreProductRow = {
   thumbnail_path: string | null;
   download_count: number | null;
   created_at: string;
+
+  store_product_pages?: Array<{
+    page_number: number;
+    storage_path: string;
+  }> | null;
 };
 
 type StoreReviewRow = {
@@ -54,8 +74,10 @@ export function formatRupiah(
   return `Rp${formatted}`;
 }
 
-export async function fetchPublishedStoreProducts():
-  Promise<StoreProductCardItem[]> {
+export async function fetchPublishedStoreProducts(
+  onFirstPagesReady?: (pages: StoreFirstPage[]) => void
+): Promise<StoreProductCardItem[]> {
+  const productsStarted = Date.now();
 
   const {
     data: productData,
@@ -64,7 +86,7 @@ export async function fetchPublishedStoreProducts():
     await supabase
       .from("store_products")
       .select(
-        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at"
+        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
       )
       .eq(
         "status",
@@ -85,11 +107,22 @@ export async function fetchPublishedStoreProducts():
     (productData ?? []) as unknown as
       StoreProductRow[];
 
+  logA4("STORE_PRODUCTS_DONE", "store", {
+    ms: Date.now() - productsStarted,
+    count: rows.length,
+  });
+  onFirstPagesReady?.(rows.map(row => ({
+    id: row.id,
+    firstPageStoragePath: row.store_product_pages
+      ?.find(page => page.page_number === 1)?.storage_path ?? null,
+  })));
+
   const productIds =
     rows.map(
       (row) => row.id
     );
 
+  const reviewsStarted = Date.now();
   let reviewRows:
     StoreReviewRow[] = [];
 
@@ -121,6 +154,8 @@ export async function fetchPublishedStoreProducts():
       (reviewData ?? []) as unknown as
         StoreReviewRow[];
   }
+
+  logA4("STORE_REVIEWS_DONE", "store", { ms: Date.now() - reviewsStarted });
 
   const ratingMap =
     new Map<
@@ -163,6 +198,15 @@ export async function fetchPublishedStoreProducts():
         ratingMap.get(
           row.id
         );
+
+      const firstPageStoragePath =
+        row.store_product_pages
+          ?.find(
+            page =>
+              page.page_number === 1
+          )
+          ?.storage_path ??
+        null;
 
       let thumbnailUrl:
         string | null = null;
@@ -228,6 +272,10 @@ export async function fetchPublishedStoreProducts():
 
         thumbnailUrl,
 
+        firstPageStoragePath,
+
+    pageCount:
+      row.store_product_pages?.length ?? 0,
         downloadCount:
           Number(
             row.download_count ??
@@ -249,7 +297,7 @@ export async function fetchPublishedStoreProductById(
     await supabase
       .from("store_products")
       .select(
-        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at"
+        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
       )
       .eq(
         "id",
@@ -316,6 +364,15 @@ export async function fetchPublishedStoreProductById(
         ).toFixed(1)
       : "0.0";
 
+  const firstPageStoragePath =
+    row.store_product_pages
+      ?.find(
+        page =>
+          page.page_number === 1
+      )
+      ?.storage_path ??
+    null;
+
   let thumbnailUrl:
     string | null = null;
 
@@ -376,6 +433,10 @@ export async function fetchPublishedStoreProductById(
 
     thumbnailUrl,
 
+    firstPageStoragePath,
+
+    pageCount:
+      row.store_product_pages?.length ?? 0,
     downloadCount:
       Number(
         row.download_count ??
