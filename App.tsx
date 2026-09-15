@@ -1272,9 +1272,15 @@ function StoreHome() {
       id: item.id,
       path: Object.prototype.hasOwnProperty.call(firstPagePaths, item.id)
         ? firstPagePaths[item.id] : item.firstPageStoragePath,
-    })).filter(item => Boolean(item.path)).slice(0, 2);
+    })).filter(item => Boolean(item.path)).slice(0, 4);
     for (const item of candidates) {
-      if (item.path) void previewSession.getUrl(item.id, item.path);
+      if (item.path) {
+        void previewSession
+          .getUrl(item.id, item.path)
+          .then(url => {
+            if (url) void Image.prefetch(url);
+          });
+      }
     }
   }, [products, firstPagePaths, previewSession, selectedProduct]);
 
@@ -1286,10 +1292,14 @@ function StoreHome() {
     // Start at product-query completion, before waiting for reviews.
     const selectedId = selectedProductRef.current?.id;
     const candidates = pages.filter(page => Boolean(page.firstPageStoragePath))
-      .slice(0, 2);
+      .slice(0, 4);
     for (const page of candidates) {
       if (page.firstPageStoragePath && (!selectedId || selectedId === page.id)) {
-        void previewSession.getUrl(page.id, page.firstPageStoragePath);
+        void previewSession
+          .getUrl(page.id, page.firstPageStoragePath)
+          .then(url => {
+            if (url) void Image.prefetch(url);
+          });
       }
     }
   }
