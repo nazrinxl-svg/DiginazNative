@@ -922,6 +922,31 @@ function StoreHome() {
     setHomeProfileName,
   ] = useState("");
 
+  const [
+    homeProfileBio,
+    setHomeProfileBio,
+  ] = useState("");
+
+  const [
+    homeProfileUsername,
+    setHomeProfileUsername,
+  ] = useState("");
+
+  const [
+    homeFollowerCount,
+    setHomeFollowerCount,
+  ] = useState(0);
+
+  const [
+    homeFollowingCount,
+    setHomeFollowingCount,
+  ] = useState(0);
+
+  const [
+    homeFollowStatsReady,
+    setHomeFollowStatsReady,
+  ] = useState(false);
+
   const profileOpenPreparingRef =
     useRef(false);
 
@@ -946,6 +971,67 @@ function StoreHome() {
         product => product.id
       )
       .join("|");
+
+  const preloadedSavedProductIds =
+    products
+      .filter(
+        product =>
+          productActionState[
+            product.id
+          ]?.isSaved === true
+      )
+      .map(
+        product =>
+          product.id
+      );
+
+  const preloadedSavedReady =
+    products.length > 0 &&
+    products.every(
+      product =>
+        productActionState[
+          product.id
+        ] !== undefined
+    );
+
+  const preloadedLikeCount =
+    storeUserId
+      ? products
+          .filter(
+            product =>
+              product.creatorUserId ===
+              storeUserId
+          )
+          .reduce(
+            (
+              total,
+              product
+            ) =>
+              total +
+              Number(
+                productActionState[
+                  product.id
+                ]?.loveCount ??
+                  0
+              ),
+            0
+          )
+      : 0;
+
+  const preloadedLikeReady =
+    Boolean(storeUserId) &&
+    products
+      .filter(
+        product =>
+          product.creatorUserId ===
+          storeUserId
+      )
+      .every(
+        product =>
+          productActionState[
+            product.id
+          ] !== undefined
+      );
 
   const [searchQuery, setSearchQuery] =
     useState("");
@@ -987,7 +1073,7 @@ function StoreHome() {
           error,
         } = await supabase
           .from("app_profiles")
-          .select("full_name,avatar_url")
+          .select("full_name,avatar_url,bio,username")
           .eq(
             "auth_user_id",
             storeUserId
@@ -1011,6 +1097,18 @@ function StoreHome() {
         setHomeProfileName(
           String(
             data?.full_name ?? ""
+          ).trim()
+        );
+
+        setHomeProfileBio(
+          String(
+            data?.bio ?? ""
+          ).trim()
+        );
+
+        setHomeProfileUsername(
+          String(
+            data?.username ?? ""
           ).trim()
         );
       } catch (error) {
@@ -1407,6 +1505,143 @@ function StoreHome() {
 
   const [selectedConversationId, setSelectedConversationId] =
     useState<string | null>(null);
+  // PROFILE_SOCIAL_STATS_PREFETCH
+  useEffect(() => {
+    let active = true;
+
+    async function preloadFollowStats() {
+      if (!storeUserId) {
+        setHomeFollowerCount(0);
+        setHomeFollowingCount(0);
+        setHomeFollowStatsReady(false);
+        return;
+      }
+
+      setHomeFollowStatsReady(
+        false
+      );
+
+      try {
+        const [
+          followersResult,
+          followingResult,
+        ] = await Promise.all([
+          supabase
+            .from(
+              "app_profile_follows"
+            )
+            .select(
+              "follower_user_id",
+              {
+                count: "exact",
+                head: true,
+              }
+            )
+            .eq(
+              "following_user_id",
+              storeUserId
+            ),
+
+          supabase
+            .from(
+              "app_profile_follows"
+            )
+            .select(
+              "following_user_id",
+              {
+                count: "exact",
+                head: true,
+              }
+            )
+            .eq(
+              "follower_user_id",
+              storeUserId
+            ),
+        ]);
+
+        if (
+          followersResult.error
+        ) {
+          throw followersResult.error;
+        }
+
+        if (
+          followingResult.error
+        ) {
+          throw followingResult.error;
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setHomeFollowerCount(
+          followersResult.count ??
+            0
+        );
+
+        setHomeFollowingCount(
+          followingResult.count ??
+            0
+        );
+
+        setHomeFollowStatsReady(
+          true
+        );
+      }
+      catch (error) {
+        console.warn(
+          "Preload statistik profil gagal:",
+          error
+        );
+      }
+    }
+
+    void preloadFollowStats();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    storeUserId,
+  ]);
+
+
+  // PROFILE_SAVED_THUMBNAIL_PREFETCH
+  useEffect(() => {
+    const candidates =
+      products
+        .filter(
+          product =>
+            productActionState[
+              product.id
+            ]?.isSaved === true &&
+            Boolean(
+              product.thumbnailUrl
+            )
+        )
+        .slice(0, 8);
+
+    for (
+      const product
+      of candidates
+    ) {
+      if (
+        product.thumbnailUrl
+      ) {
+        void Image.prefetch(
+          product.thumbnailUrl
+        ).catch(
+          () => undefined
+        );
+      }
+    }
+  }, [
+    products,
+    productActionState,
+  ]);
+
+
   // PROFILE_AVATAR_PREFETCH_V4B
   useEffect(() => {
     if (!homeAvatarUrl) {
@@ -1435,6 +1670,12 @@ function StoreHome() {
 
       let preparedAvatar =
         homeAvatarUrl.trim();
+
+      let preparedBio =
+        homeProfileBio.trim();
+
+      let preparedUsername =
+        homeProfileUsername.trim();
 
       /*
        * Kalau salah satunya belum siap,
@@ -1469,7 +1710,7 @@ function StoreHome() {
                 "app_profiles"
               )
               .select(
-                "full_name,avatar_url"
+                "full_name,avatar_url,bio,username"
               )
               .eq(
                 "auth_user_id",
@@ -1491,12 +1732,30 @@ function StoreHome() {
               data?.avatar_url ?? ""
             ).trim();
 
+          preparedBio =
+            String(
+              data?.bio ?? ""
+            ).trim();
+
+          preparedUsername =
+            String(
+              data?.username ?? ""
+            ).trim();
+
           setHomeProfileName(
             preparedName
           );
 
           setHomeAvatarUrl(
             preparedAvatar
+          );
+
+          setHomeProfileBio(
+            preparedBio
+          );
+
+          setHomeProfileUsername(
+            preparedUsername
           );
         }
       }
@@ -1844,6 +2103,34 @@ function StoreHome() {
             }
             initialAvatarUrl={
               homeAvatarUrl
+            }
+            initialBio={
+              homeProfileBio
+            }
+            initialUsername={
+              homeProfileUsername
+            }
+            initialSavedProductIds={
+              preloadedSavedProductIds
+            }
+            initialSavedReady={
+              preloadedSavedReady
+            }
+            initialUserId={
+              storeUserId ?? ""
+            }
+            initialFollowerCount={
+              homeFollowerCount
+            }
+            initialFollowingCount={
+              homeFollowingCount
+            }
+            initialLikeCount={
+              preloadedLikeCount
+            }
+            initialSocialReady={
+              homeFollowStatsReady &&
+              preloadedLikeReady
             }
             products={products}
             onBack={() =>

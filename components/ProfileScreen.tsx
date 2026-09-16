@@ -70,6 +70,15 @@ type Props = {
 
   initialName?: string;
   initialAvatarUrl?: string;
+  initialBio?: string;
+  initialUsername?: string;
+  initialSavedProductIds?: string[];
+  initialSavedReady?: boolean;
+  initialUserId?: string;
+  initialFollowerCount?: number;
+  initialFollowingCount?: number;
+  initialLikeCount?: number;
+  initialSocialReady?: boolean;
 
   products:
     StoreProductCardItem[];
@@ -142,6 +151,15 @@ export default function ProfileScreen({
   onBack,
   initialName = "",
   initialAvatarUrl = "",
+  initialBio = "",
+  initialUsername = "",
+  initialSavedProductIds = [],
+  initialSavedReady = false,
+  initialUserId = "",
+  initialFollowerCount = 0,
+  initialFollowingCount = 0,
+  initialLikeCount = 0,
+  initialSocialReady = false,
   products,
   onOpenProduct,
 }: Props) {
@@ -175,7 +193,8 @@ export default function ProfileScreen({
     currentUserId,
     setCurrentUserId,
   ] = useState<string | null>(
-    null
+    initialUserId.trim() ||
+      null
   );
 
   const [
@@ -185,6 +204,30 @@ export default function ProfileScreen({
     initialName.trim() ||
       "Pengguna Diginaz"
   );
+
+  const displayName =
+    useMemo(() => {
+      const firstName =
+        name
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean)[0] ??
+        "";
+
+      if (!firstName) {
+        return "Pengguna";
+      }
+
+      const normalized =
+        firstName.toLowerCase();
+
+      return (
+        normalized
+          .charAt(0)
+          .toUpperCase() +
+        normalized.slice(1)
+      );
+    }, [name]);
 
   const [
     email,
@@ -201,12 +244,16 @@ export default function ProfileScreen({
   const [
     bio,
     setBio,
-  ] = useState("");
+  ] = useState(
+    initialBio.trim()
+  );
 
   const [
     username,
     setUsername,
-  ] = useState("");
+  ] = useState(
+    initialUsername.trim()
+  );
 
   const [
     avatarUrl,
@@ -314,17 +361,23 @@ export default function ProfileScreen({
   const [
     followerCount,
     setFollowerCount,
-  ] = useState(0);
+  ] = useState(
+    initialFollowerCount
+  );
 
   const [
     followingCount,
     setFollowingCount,
-  ] = useState(0);
+  ] = useState(
+    initialFollowingCount
+  );
 
   const [
     likeCount,
     setLikeCount,
-  ] = useState(0);
+  ] = useState(
+    initialLikeCount
+  );
 
 
   const [
@@ -340,12 +393,40 @@ export default function ProfileScreen({
     savedProductIds,
     setSavedProductIds,
   ] =
-    useState<string[]>([]);
+    useState<string[]>(
+      initialSavedProductIds
+    );
 
   const [
     savedLoading,
     setSavedLoading,
-  ] = useState(false);
+  ] = useState(
+    !initialSavedReady
+  );
+
+  const initialSavedProductIdsKey =
+    initialSavedProductIds.join(
+      "|"
+    );
+
+  useEffect(() => {
+    if (
+      !initialSavedReady
+    ) {
+      return;
+    }
+
+    setSavedProductIds(
+      initialSavedProductIds
+    );
+
+    setSavedLoading(
+      false
+    );
+  }, [
+    initialSavedProductIdsKey,
+    initialSavedReady,
+  ]);
 
   const myProducts =
     useMemo(
@@ -422,7 +503,13 @@ export default function ProfileScreen({
         return;
       }
 
-      setSavedLoading(true);
+      if (
+        !initialSavedReady
+      ) {
+        setSavedLoading(
+          true
+        );
+      }
 
       try {
         const {
@@ -473,8 +560,13 @@ export default function ProfileScreen({
           error
         );
 
-        if (active) {
-          setSavedProductIds([]);
+        if (
+          active &&
+          !initialSavedReady
+        ) {
+          setSavedProductIds(
+            []
+          );
         }
       }
       finally {
@@ -489,7 +581,10 @@ export default function ProfileScreen({
     return () => {
       active = false;
     };
-  }, [currentUserId]);
+  }, [
+    currentUserId,
+    initialSavedReady,
+  ]);
 
 
   useEffect(() => {
@@ -686,6 +781,30 @@ export default function ProfileScreen({
       active = false;
     };
   }, []);
+
+
+  useEffect(() => {
+    if (
+      initialSocialReady
+    ) {
+      setFollowerCount(
+        initialFollowerCount
+      );
+
+      setFollowingCount(
+        initialFollowingCount
+      );
+
+      setLikeCount(
+        initialLikeCount
+      );
+    }
+  }, [
+    initialFollowerCount,
+    initialFollowingCount,
+    initialLikeCount,
+    initialSocialReady,
+  ]);
 
 
   useEffect(() => {
@@ -3393,7 +3512,7 @@ await Promise.race([
                   }
                   numberOfLines={2}
                 >
-                  {name}
+                  {displayName}
                 </Text>
 
                 <Text
@@ -3427,6 +3546,7 @@ await Promise.race([
                       styles.profileAvatarImage
                     }
                     resizeMode="cover"
+                    fadeDuration={0}
                   />
                 ) : (
 <Text
@@ -3435,7 +3555,7 @@ await Promise.race([
                   }
                 >
                   {getInitial(
-                    name
+                    displayName
                   )}
                 </Text>
                 )}
@@ -3702,6 +3822,7 @@ await Promise.race([
                             styles.productImage
                           }
                           resizeMode="cover"
+                          fadeDuration={0}
                         />
                       ) : (
                         <View
