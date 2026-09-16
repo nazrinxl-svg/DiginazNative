@@ -11,8 +11,17 @@ import {
 } from "react-native";
 import Svg, { Path } from "react-native-svg";
 import { SafeAreaView } from "react-native-safe-area-context";
+import {
+  GoogleSignin,
+  isSuccessResponse,
+} from "@react-native-google-signin/google-signin";
 
 import { supabase } from "../lib/supabase";
+
+const DIGINAZ_LOGIN_LOGO =
+  Platform.OS === "android"
+    ? { uri: "diginaz_logo" }
+    : require("../assets/diginaz-logo.png");
 
 function GoogleMark() {
   return (
@@ -217,15 +226,7 @@ export default function AuthScreen() {
         );
       }
 
-      const {
-        GoogleSignin,
-        isSuccessResponse,
-      } =
-        await import(
-          "@react-native-google-signin/google-signin"
-        );
-
-      GoogleSignin.configure({
+GoogleSignin.configure({
         webClientId,
       });
 
@@ -294,7 +295,7 @@ export default function AuthScreen() {
       <View style={styles.page}>
         <View style={styles.content}>
           <Image
-            source={require("../assets/diginaz-logo.png")}
+            source={DIGINAZ_LOGIN_LOGO}
             resizeMode="contain"
             style={styles.logo}
           />
@@ -302,6 +303,7 @@ export default function AuthScreen() {
           <Text style={styles.brandTitle}>
             Diginaz
           </Text>
+
 
           <View style={styles.card}>
             {errorMessage ? (

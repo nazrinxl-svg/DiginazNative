@@ -1,4 +1,5 @@
 import { Bookmark } from "lucide-react-native";
+import { GoogleSignin } from "@react-native-google-signin/google-signin";
 import { getLocalUser } from "../lib/localAuth";
 
 import React, {
@@ -158,6 +159,11 @@ export default function ProfileScreen({
   const [
     logoutLoading,
     setLogoutLoading,
+  ] = useState(false);
+
+  const [
+    showLogoutConfirm,
+    setShowLogoutConfirm,
   ] = useState(false);
 
   const [
@@ -1907,52 +1913,46 @@ export default function ProfileScreen({
     setErrorMessage("");
 
     try {
+      const googleLogoutTask =
+        (async () => {
+          try {
+await Promise.race([
+              GoogleSignin.signOut(),
+
+              new Promise<void>(
+                resolve => {
+                  setTimeout(
+                    resolve,
+                    250
+                  );
+                }
+              ),
+            ]);
+          } catch (googleError) {
+            console.warn(
+              "Google logout dilewati:",
+              googleError
+            );
+          }
+        })();
+
       /*
-       * Logout Google bersifat tambahan.
-       * Kalau Google logout gagal, session
-       * Supabase tetap HARUS dibersihkan.
+       * Mulai logout Supabase bersamaan
+       * dengan cleanup Google.
+       * Session lokal tidak lagi menunggu
+       * Google sampai 1.8 detik.
        */
-      try {
-        const {
-          GoogleSignin,
-        } =
-          await import(
-            "@react-native-google-signin/google-signin"
-          );
+      const [
+        supabaseResult,
+      ] = await Promise.all([
+        supabase.auth.signOut({
+          scope: "local",
+        }),
+        googleLogoutTask,
+      ]);
 
-        /*
-         * Ganti akun tidak boleh tertahan
-         * jika Google Sign-In lambat merespons.
-         */
-        await Promise.race([
-          GoogleSignin.signOut(),
-
-          new Promise<void>(
-            resolve => {
-              setTimeout(
-                resolve,
-                1800
-              );
-            }
-          ),
-        ]);
-      } catch (googleError) {
-        console.warn(
-          "Google logout dilewati:",
-          googleError
-        );
-      }
-
-      const {
-        error,
-      } =
-        await supabase.auth
-          .signOut({
-            scope: "local",
-          });
-
-      if (error) {
-        throw error;
+      if (supabaseResult.error) {
+        throw supabaseResult.error;
       }
 
     } catch (error) {
@@ -1971,25 +1971,13 @@ export default function ProfileScreen({
     }
   }
 
-
   function confirmLogout() {
-    Alert.alert(
-      "Ganti akun?",
-      "Anda akan kembali ke halaman masuk untuk memilih akun Google lain.",
-      [
-        {
-          text: "Batal",
-          style: "cancel",
-        },
-        {
-          text: "Ganti akun",
-          style: "destructive",
-          onPress: () => {
-            void handleLogout();
-          },
-        },
-      ]
-    );
+    if (logoutLoading) {
+      return;
+    }
+
+    setErrorMessage("");
+    setShowLogoutConfirm(true);
   }
 
 
@@ -2046,7 +2034,105 @@ export default function ProfileScreen({
             strokeWidth={2}
           />
         </Pressable>
-      </View>
+      </View>      <Modal
+        visible={showLogoutConfirm}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() => {
+          if (!logoutLoading) {
+            setErrorMessage("");
+            setShowLogoutConfirm(false);
+          }
+        }}
+      >
+        <View style={styles.accountSwitchBackdrop}>
+          <View style={styles.accountSwitchCard}>
+            <View style={styles.accountSwitchIconWrap}>
+              <LogOut
+                size={24}
+                color="#2563EB"
+                strokeWidth={2.2}
+              />
+            </View>
+
+            <Text style={styles.accountSwitchTitle}>
+              Ganti akun?
+            </Text>
+
+            <Text style={styles.accountSwitchDescription}>
+              Anda akan keluar dari akun ini dan kembali ke halaman masuk untuk memilih akun Google lain.
+            </Text>
+
+            {errorMessage ? (
+              <Text style={styles.accountSwitchError}>
+                {errorMessage}
+              </Text>
+            ) : null}
+
+            <View style={styles.accountSwitchActions}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={logoutLoading}
+                onPress={() => {
+                  setErrorMessage("");
+                  setShowLogoutConfirm(false);
+                }}
+                style={({ pressed }) => [
+                  styles.accountSwitchCancelButton,
+                  pressed &&
+                    !logoutLoading &&
+                    styles.accountSwitchButtonPressed,
+                  logoutLoading &&
+                    styles.accountSwitchButtonDisabled,
+                ]}
+              >
+                <Text style={styles.accountSwitchCancelText}>
+                  Batal
+                </Text>
+              </Pressable>
+
+              <Pressable
+                accessibilityRole="button"
+                disabled={logoutLoading}
+                onPress={() => {
+                  void handleLogout();
+                }}
+                style={({ pressed }) => [
+                  styles.accountSwitchConfirmButton,
+                  pressed &&
+                    !logoutLoading &&
+                    styles.accountSwitchButtonPressed,
+                  logoutLoading &&
+                    styles.accountSwitchButtonDisabled,
+                ]}
+              >
+                {logoutLoading ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                  />
+                ) : (
+                  <>
+                    <LogOut
+                      size={17}
+                      color="#FFFFFF"
+                      strokeWidth={2.2}
+                    />
+
+                    <Text style={styles.accountSwitchConfirmText}>
+                      Ganti akun
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+
+
 
 
       <Modal
@@ -3771,7 +3857,8 @@ const styles =
       paddingRight: 6,
       flexDirection: "row",
       alignItems: "flex-start",
-      justifyContent: "space-between",
+      justifyContent: "flex-start",
+      gap: 20,
     },
 
     socialStat: {
@@ -3954,6 +4041,110 @@ const styles =
       textAlign: "center",
       color: "#94A3B8",
       fontFamily: "PlusJakartaSans_400Regular",
+    },
+
+    accountSwitchBackdrop: {
+      flex: 1,
+      backgroundColor: "rgba(15, 23, 42, 0.48)",
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 24,
+    },
+
+    accountSwitchCard: {
+      width: "100%",
+      maxWidth: 360,
+      backgroundColor: "#FFFFFF",
+      borderRadius: 22,
+      paddingTop: 22,
+      paddingHorizontal: 20,
+      paddingBottom: 18,
+      alignItems: "center",
+    },
+
+    accountSwitchIconWrap: {
+      width: 50,
+      height: 50,
+      borderRadius: 25,
+      backgroundColor: "#EFF6FF",
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 14,
+    },
+
+    accountSwitchTitle: {
+      fontFamily: "PlusJakartaSans_600SemiBold",
+      fontSize: 18,
+      lineHeight: 24,
+      color: "#0F172A",
+      textAlign: "center",
+    },
+
+    accountSwitchDescription: {
+      marginTop: 7,
+      fontFamily: "PlusJakartaSans_400Regular",
+      fontSize: 13,
+      lineHeight: 20,
+      color: "#64748B",
+      textAlign: "center",
+      paddingHorizontal: 4,
+    },
+
+    accountSwitchError: {
+      marginTop: 10,
+      fontFamily: "PlusJakartaSans_400Regular",
+      fontSize: 12,
+      lineHeight: 18,
+      color: "#DC2626",
+      textAlign: "center",
+    },
+
+    accountSwitchActions: {
+      width: "100%",
+      flexDirection: "row",
+      marginTop: 20,
+    },
+
+    accountSwitchCancelButton: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: 12,
+      backgroundColor: "#F1F5F9",
+      alignItems: "center",
+      justifyContent: "center",
+      marginRight: 5,
+    },
+
+    accountSwitchConfirmButton: {
+      flex: 1,
+      minHeight: 46,
+      borderRadius: 12,
+      backgroundColor: "#2563EB",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      marginLeft: 5,
+    },
+
+    accountSwitchCancelText: {
+      fontFamily: "PlusJakartaSans_600SemiBold",
+      fontSize: 14,
+      color: "#334155",
+    },
+
+    accountSwitchConfirmText: {
+      marginLeft: 7,
+      fontFamily: "PlusJakartaSans_600SemiBold",
+      fontSize: 14,
+      color: "#FFFFFF",
+    },
+
+    accountSwitchButtonPressed: {
+      opacity: 0.82,
+    },
+
+    accountSwitchButtonDisabled: {
+      opacity: 0.65,
     },
 
     menuBackdrop: {
