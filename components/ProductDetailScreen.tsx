@@ -32,7 +32,6 @@ import {
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import CheckoutScreen from "./CheckoutScreen";
 import ReactNativeBlobUtil from "react-native-blob-util";
 import { supabase } from "../lib/supabase";
 import { pdfViewer } from "../lib/pdfViewer";
@@ -163,13 +162,6 @@ export default function ProductDetailScreen({
     activeProductSlide,
     setActiveProductSlide,
   ] = useState(0);
-
-  const [
-    showCheckout,
-    setShowCheckout,
-  ] =
-    useState(false);
-
   const [detail, setDetail] =
     useState<ProductDetailRow | null>(null);
 
@@ -1002,20 +994,11 @@ export default function ProductDetailScreen({
       setFollowLoading(false);
     }
   }
-
-  // TEMPORARY_CHECKOUT_TEST
-  // Hanya untuk menguji checkout produk berbayar
-  // milik akun sendiri. isOwner tetap asli.
-  const forceBuyerCheckoutPreview =
-    isOwner &&
-    product.price !== "Gratis";
-
   const canDownloadProduct =
     product.price === "Gratis" ||
-    (
-      !forceBuyerCheckoutPreview &&
-      (isOwner || hasProductAccess)
-    );
+    isOwner ||
+    hasProductAccess;
+
   useEffect(() => {
     let active = true;
 
@@ -1817,18 +1800,94 @@ export default function ProductDetailScreen({
             Platform.Version
           ) >= 29
         ) {
-          const downloadResult =
-            await ReactNativeBlobUtil
-              .config({
-                fileCache: true,
-              })
-              .fetch(
-                "GET",
-                data.signedUrl
-              );
+          let temporaryPath = "";
+          let shouldCleanupTemporaryPath =
+            true;
 
-          const temporaryPath =
-            downloadResult.path();
+          /*
+           * PDF yang sudah dipakai viewer
+           * sudah ada di cache perangkat.
+           * Jangan download file yang sama
+           * untuk kedua kalinya.
+           */
+          const canReusePdfCache =
+            detail.file_path
+              .trim()
+              .toLowerCase()
+              .endsWith(".pdf") &&
+            Boolean(pdfLocalPath);
+
+          if (
+            canReusePdfCache &&
+            pdfLocalPath
+          ) {
+            try {
+              const cachedExists =
+                await ReactNativeBlobUtil
+                  .fs
+                  .exists(
+                    pdfLocalPath
+                  );
+
+              if (cachedExists) {
+                const cachedStat =
+                  await ReactNativeBlobUtil
+                    .fs
+                    .stat(
+                      pdfLocalPath
+                    );
+
+                if (
+                  Number(
+                    cachedStat.size ?? 0
+                  ) > 0
+                ) {
+                  temporaryPath =
+                    pdfLocalPath;
+
+                  shouldCleanupTemporaryPath =
+                    false;
+
+                  console.log(
+                    "[DOWNLOAD]",
+                    JSON.stringify({
+                      event:
+                        "REUSE_PDF_CACHE",
+                      productId:
+                        product.id,
+                      path:
+                        pdfLocalPath,
+                    })
+                  );
+                }
+              }
+            }
+            catch (cacheError) {
+              console.warn(
+                "Cache PDF belum dapat dipakai untuk download:",
+                cacheError
+              );
+            }
+          }
+
+          /*
+           * Fallback: kalau cache viewer belum siap,
+           * download dari storage seperti sebelumnya.
+           */
+          if (!temporaryPath) {
+            const downloadResult =
+              await ReactNativeBlobUtil
+                .config({
+                  fileCache: true,
+                })
+                .fetch(
+                  "GET",
+                  data.signedUrl
+                );
+
+            temporaryPath =
+              downloadResult.path();
+          }
 
           try {
             const mediaUri =
@@ -1859,35 +1918,47 @@ export default function ProductDetailScreen({
                   safeName,
                 uri:
                   mediaUri,
+                reusedPdfCache:
+                  !shouldCleanupTemporaryPath,
               })
             );
 
-            setDownloadSuccessFileName(safeName);
+            setDownloadSuccessFileName(
+              safeName
+            );
           }
           finally {
-            try {
-              const exists =
-                await ReactNativeBlobUtil
-                  .fs
-                  .exists(
-                    temporaryPath
-                  );
-
-              if (exists) {
-                await ReactNativeBlobUtil
-                  .fs
-                  .unlink(
-                    temporaryPath
-                  );
-              }
-            }
-            catch (
-              cleanupError
+            /*
+             * Jangan hapus cache PDF viewer.
+             * Hanya hapus temporary file hasil
+             * network download fallback.
+             */
+            if (
+              shouldCleanupTemporaryPath &&
+              temporaryPath
             ) {
-              console.warn(
-                "File sementara download gagal dibersihkan:",
-                cleanupError
-              );
+              try {
+                const exists =
+                  await ReactNativeBlobUtil
+                    .fs
+                    .exists(
+                      temporaryPath
+                    );
+
+                if (exists) {
+                  await ReactNativeBlobUtil
+                    .fs
+                    .unlink(
+                      temporaryPath
+                    );
+                }
+              }
+              catch (cleanupError) {
+                console.warn(
+                  "File sementara download gagal dibersihkan:",
+                  cleanupError
+                );
+              }
             }
           }
 
@@ -1971,18 +2042,12 @@ export default function ProductDetailScreen({
       return;
     }
 
-    if (
-      isOwner &&
-      !forceBuyerCheckoutPreview
-    ) {
+    if (isOwner) {
       await openOwnedProduct();
       return;
     }
 
-    if (
-      hasProductAccess &&
-      !forceBuyerCheckoutPreview
-    ) {
+    if (hasProductAccess) {
       await openOwnedProduct();
       return;
     }
@@ -2082,7 +2147,10 @@ export default function ProductDetailScreen({
       return;
     }
 
-    setShowCheckout(true);
+    Alert.alert(
+      "Pembayaran belum tersedia",
+      "Fitur pembelian produk berbayar sedang dipersiapkan."
+    );
   }
 
   /*
@@ -2118,16 +2186,6 @@ export default function ProductDetailScreen({
       1
     );
 
-  if (showCheckout) {
-    return (
-      <CheckoutScreen
-        product={product}
-        onBack={() =>
-          setShowCheckout(false)
-        }
-      />
-    );
-  }
 
   return (
     <SafeAreaView

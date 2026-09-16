@@ -219,6 +219,21 @@ function ProductCard({
       )
     );
 
+    /*
+     * LOVE_OPTIMISTIC_PAINT_FIRST
+     *
+     * Beri React Native satu frame untuk
+     * menampilkan icon + angka baru sebelum
+     * request Supabase dimulai.
+     */
+    await new Promise<void>(
+      resolve => {
+        requestAnimationFrame(
+          () => resolve()
+        );
+      }
+    );
+
 
     try {
       if (nextLoved) {
@@ -528,27 +543,20 @@ function ProductCard({
               }}
               accessibilityLabel="Love produk"
             >
-              {loveLoading ? (
-                <ActivityIndicator
-                  size="small"
-                  color="#E11D48"
-                />
-              ) : (
-                <Heart
-                  size={16}
-                  color={
-                    isLoved
-                      ? "#E11D48"
-                      : "#64748B"
-                  }
-                  fill={
-                    isLoved
-                      ? "#E11D48"
-                      : "none"
-                  }
-                  strokeWidth={1.8}
-                />
-              )}
+              <Heart
+                size={16}
+                color={
+                  isLoved
+                    ? "#E11D48"
+                    : "#64748B"
+                }
+                fill={
+                  isLoved
+                    ? "#E11D48"
+                    : "none"
+                }
+                strokeWidth={1.8}
+              />
               <Text
                 style={{
                   marginTop: 0,
@@ -559,9 +567,7 @@ function ProductCard({
                 }}
               >
                 {formatEngagementCount(
-                  getDummyCardEngagement(
-                    product.id
-                  ).love
+                  loveCount
                 )}
               </Text>
             </Pressable>
@@ -643,9 +649,7 @@ function ProductCard({
                 }}
               >
                 {formatEngagementCount(
-                  getDummyCardEngagement(
-                    product.id
-                  ).comment
+                  product.reviewCount
                 )}
               </Text>
             </Pressable>
@@ -2261,6 +2265,18 @@ function StoreHome() {
         }
         productTitle={
           selectedCommentsProduct.title
+        }
+        productCoverUrl={
+          selectedCommentsProduct.thumbnailUrl
+        }
+        productType={
+          selectedCommentsProduct.type
+        }
+        productSubject={
+          selectedCommentsProduct.subject
+        }
+        productLevel={
+          selectedCommentsProduct.level
         }
         onBack={() =>
           setSelectedCommentsProduct(

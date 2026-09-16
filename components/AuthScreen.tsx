@@ -337,7 +337,21 @@ GoogleSignin.configure({
               )}
             </Pressable>
           </View>
+
+          <View style={styles.loginInfo}>
+            <Text style={styles.loginInfoTitle}>
+              Masuk untuk melanjutkan ke Diginaz
+            </Text>
+
+            <Text style={styles.loginInfoText}>
+              Akses media pembelajaran dengan akun Google Anda.
+            </Text>
+          </View>
         </View>
+
+        <Text style={styles.footerText}>
+          {"Diginaz \u00A9 2026"}
+        </Text>
       </View>
     </SafeAreaView>
   );
@@ -528,6 +542,41 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: 9,
+  },
+
+  loginInfo: {
+    marginTop: 18,
+    alignItems: "center",
+    paddingHorizontal: 18,
+  },
+
+  loginInfoTitle: {
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#475569",
+    textAlign: "center",
+  },
+
+  loginInfoText: {
+    marginTop: 3,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 9.5,
+    lineHeight: 14,
+    color: "#94A3B8",
+    textAlign: "center",
+  },
+
+  footerText: {
+    position: "absolute",
+    bottom: 18,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 9.5,
+    color: "#94A3B8",
+    textAlign: "center",
   },
 
   googleButtonDisabled: {

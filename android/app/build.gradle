@@ -7,6 +7,9 @@ apply plugin: "com.facebook.react"
  * By default you don't need to apply any configuration, just uncomment the lines you need.
  */
 react {
+    // Batasi Metro transformer agar release bundling tidak
+    // membuka banyak Jest worker dan menghabiskan RAM.
+    extraPackagerArgs = ["--max-workers", "1"]
     /* Folders */
     //   The root of your project, i.e. where "package.json" lives. Default is '../..'
     // root = file("../../")
