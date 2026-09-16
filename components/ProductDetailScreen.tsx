@@ -121,6 +121,11 @@ export default function ProductDetailScreen({
   const openedAtRef = useRef(Date.now());
   const imageStartedRef = useRef(new Map<string, number>());
   const sourceUrlsRef = useRef<Array<string | null>>([]);
+
+  // MULTIPAGE_IMAGE_DOWNLOAD_V1
+  // URL signed untuk viewer tetap terpisah dari storage_path download.
+  const productPageRowsRef =
+    useRef<ProductPageRow[]>([]);
   const [firstImageSettledUrl, setFirstImageSettledUrl] = useState<string | null>(null);
   const [productPageUrls, setProductPageUrls] = useState<Array<string | null>>(() => {
     const cached = pagePreview.peek(product.id, product.firstPageStoragePath);
@@ -235,6 +240,18 @@ export default function ProductDetailScreen({
     setDownloadSuccessFileName,
   ] = useState<string | null>(null);
 
+  const [
+    downloadSuccessFileUri,
+    setDownloadSuccessFileUri,
+  ] = useState<string | null>(null);
+
+  const [
+    downloadSuccessFileMime,
+    setDownloadSuccessFileMime,
+  ] = useState(
+    "application/octet-stream"
+  );
+
 
   const [
     isLoved,
@@ -278,6 +295,8 @@ export default function ProductDetailScreen({
       setLoading(true);
       setErrorMessage("");
       setActiveProductSlide(0);
+
+      productPageRowsRef.current = [];
 
       const pagesStarted = Date.now();
       logA4("PAGES_QUERY_START", product.id);
@@ -394,7 +413,16 @@ export default function ProductDetailScreen({
           // A background metadata failure must not erase a ready first image.
           console.warn("Halaman produk gagal dimuat:", pageRowsError);
         } else {
-          const pages = (pageRows ?? []) as ProductPageRow[];
+          const pages =
+            (pageRows ?? []) as ProductPageRow[];
+
+          productPageRowsRef.current =
+            [...pages].sort(
+              (a, b) =>
+                Number(a.page_number) -
+                Number(b.page_number)
+            );
+
           if (pages.length > 0) {
             const firstPageUrl = await pagePreview.getUrl(
               product.id, pages[0].storage_path, pages[0].page_number
@@ -1652,24 +1680,393 @@ export default function ProductDetailScreen({
   async function openOwnedProduct(
     skipLoadingGuard = false
   ) {
+    // FIRST_CLICK_DOWNLOAD_READINESS_V1
     if (
-      (!skipLoadingGuard &&
-        productAccessLoading) ||
-      !detail?.file_path
+      !skipLoadingGuard &&
+      productAccessLoading
     ) {
-      if (!detail?.file_path) {
-        Alert.alert(
-          "File belum tersedia",
-          "File produk belum tersedia untuk diunduh."
-        );
-      }
-
       return;
     }
 
     setProductAccessLoading(true);
 
     try {
+      let downloadFilePath =
+        detail?.file_path?.trim() ?? "";
+
+      const detailIsPdf =
+        downloadFilePath
+          .toLowerCase()
+          .endsWith(".pdf");
+
+      /*
+       * MULTIPAGE_IMAGE_DOWNLOAD_V1
+       *
+       * PDF yang sudah diketahui .pdf langsung melewati
+       * jalur ini dan tetap memakai alur lama.
+       */
+      if (!detailIsPdf) {
+        let imagePages =
+          [...productPageRowsRef.current].sort(
+            (a, b) =>
+              Number(a.page_number) -
+              Number(b.page_number)
+          );
+
+        /*
+         * Tombol Unduh tidak menunggu race background viewer.
+         * Jika rows belum masuk ref, query langsung saat klik.
+         */
+        if (imagePages.length === 0) {
+          const {
+            data: freshPages,
+            error: freshPagesError,
+          } =
+            await supabase
+              .from("store_product_pages")
+              .select("page_number,storage_path")
+              .eq("product_id", product.id)
+              .order("page_number", {
+                ascending: true,
+              });
+
+          if (freshPagesError) {
+            throw freshPagesError;
+          }
+
+          imagePages =
+            ((freshPages ?? []) as ProductPageRow[])
+              .slice()
+              .sort(
+                (a, b) =>
+                  Number(a.page_number) -
+                  Number(b.page_number)
+              );
+
+          productPageRowsRef.current =
+            imagePages;
+        }
+
+        if (imagePages.length > 0) {
+          const safeImageTitle =
+            (
+              product.title.trim() ||
+              "Produk Diginaz"
+            )
+              .replace(
+                /[<>:"/\|?* -]/g,
+                "_"
+              )
+              .replace(/s+/g, " ")
+              .replace(/[. ]+$/g, "")
+              .slice(0, 110) ||
+            "Produk Diginaz";
+
+          const mimeMap: Record<string, string> = {
+            jpg: "image/jpeg",
+            jpeg: "image/jpeg",
+            png: "image/png",
+            webp: "image/webp",
+          };
+
+          const digits =
+            Math.max(
+              2,
+              String(imagePages.length).length
+            );
+
+          let firstSavedUri: string | null = null;
+          let firstSavedMime = "image/jpeg";
+          let firstSavedName = "";
+
+          for (
+            let index = 0;
+            index < imagePages.length;
+            index += 1
+          ) {
+            const page = imagePages[index];
+
+            /*
+             * Gunakan signer yang sama dengan viewer.
+             * storage_path tetap authority.
+             */
+            const signedPageUrl =
+              await pagePreview.getUrl(
+                product.id,
+                page.storage_path,
+                page.page_number
+              );
+
+            if (!signedPageUrl) {
+              throw new Error(
+                "Halaman " +
+                  String(index + 1) +
+                  " belum dapat diunduh."
+              );
+            }
+
+            const originalName =
+              page.storage_path
+                .split("?")[0]
+                .split("/")
+                .pop()
+                ?.trim() ?? "";
+
+            const rawExtension =
+              originalName.includes(".")
+                ? (
+                    originalName.split(".").pop() ??
+                    ""
+                  )
+                    .trim()
+                    .toLowerCase()
+                : "";
+
+            const extension =
+              Object.prototype.hasOwnProperty.call(
+                mimeMap,
+                rawExtension
+              )
+                ? rawExtension
+                : "jpg";
+
+            const mime =
+              mimeMap[extension] ??
+              "image/jpeg";
+
+            const sequence =
+              String(index + 1).padStart(
+                digits,
+                "0"
+              );
+
+            const fileName =
+              safeImageTitle +
+              " - " +
+              sequence +
+              "." +
+              extension;
+
+            if (
+              Platform.OS === "android" &&
+              Number(Platform.Version) >= 29
+            ) {
+              let temporaryPath = "";
+
+              try {
+                const result =
+                  await ReactNativeBlobUtil
+                    .config({
+                      fileCache: true,
+                    })
+                    .fetch(
+                      "GET",
+                      signedPageUrl
+                    );
+
+                temporaryPath =
+                  result.path();
+
+                const mediaUri =
+                  await ReactNativeBlobUtil
+                    .MediaCollection
+                    .copyToMediaStore(
+                      {
+                        name: fileName,
+                        parentFolder: "",
+                        mimeType: mime,
+                      },
+                      "Download",
+                      temporaryPath
+                    );
+
+                if (!mediaUri) {
+                  throw new Error(
+                    "Halaman " +
+                      String(index + 1) +
+                      " gagal disimpan."
+                  );
+                }
+
+                console.log(
+                  "[DOWNLOAD]",
+                  JSON.stringify({
+                    event:
+                      "MULTIPAGE_MEDIASTORE_SAVED",
+                    productId: product.id,
+                    page: index + 1,
+                    total: imagePages.length,
+                    name: fileName,
+                    uri: mediaUri,
+                  })
+                );
+
+                if (!firstSavedUri) {
+                  firstSavedUri = mediaUri;
+                  firstSavedMime = mime;
+                  firstSavedName = fileName;
+                }
+              }
+              finally {
+                if (temporaryPath) {
+                  try {
+                    const exists =
+                      await ReactNativeBlobUtil
+                        .fs
+                        .exists(
+                          temporaryPath
+                        );
+
+                    if (exists) {
+                      await ReactNativeBlobUtil
+                        .fs
+                        .unlink(
+                          temporaryPath
+                        );
+                    }
+                  }
+                  catch (cleanupError) {
+                    console.warn(
+                      "Temporary multipage gagal dibersihkan:",
+                      cleanupError
+                    );
+                  }
+                }
+              }
+
+              continue;
+            }
+
+            if (Platform.OS === "android") {
+              const targetPath =
+                ReactNativeBlobUtil
+                  .fs
+                  .dirs
+                  .DownloadDir +
+                "/" +
+                fileName;
+
+              await ReactNativeBlobUtil
+                .config({
+                  addAndroidDownloads: {
+                    useDownloadManager: true,
+                    notification: true,
+                    mediaScannable: true,
+                    title: fileName,
+                    description:
+                      "Mengunduh " +
+                      product.title,
+                    mime,
+                    path: targetPath,
+                  },
+                })
+                .fetch(
+                  "GET",
+                  signedPageUrl
+                );
+
+              if (!firstSavedUri) {
+                firstSavedUri = targetPath;
+                firstSavedMime = mime;
+                firstSavedName = fileName;
+              }
+
+              continue;
+            }
+
+            const targetPath =
+              ReactNativeBlobUtil
+                .fs
+                .dirs
+                .DocumentDir +
+              "/" +
+              fileName;
+
+            await ReactNativeBlobUtil
+              .config({
+                path: targetPath,
+                fileCache: true,
+              })
+              .fetch(
+                "GET",
+                signedPageUrl
+              );
+
+            if (!firstSavedUri) {
+              firstSavedUri = targetPath;
+              firstSavedMime = mime;
+              firstSavedName = fileName;
+            }
+          }
+
+          /*
+           * Modal baru dibuka setelah SELURUH loop selesai.
+           * Tombol Lihat tetap menunjuk halaman pertama.
+           */
+          if (!firstSavedUri) {
+            throw new Error(
+              "Tidak ada halaman yang berhasil disimpan."
+            );
+          }
+
+          setDownloadSuccessFileUri(
+            firstSavedUri
+          );
+
+          setDownloadSuccessFileMime(
+            firstSavedMime
+          );
+
+          setDownloadSuccessFileName(
+            firstSavedName
+          );
+
+          console.log(
+            "[DOWNLOAD]",
+            JSON.stringify({
+              event: "MULTIPAGE_COMPLETE",
+              productId: product.id,
+              total: imagePages.length,
+            })
+          );
+
+          return;
+        }
+      }
+
+      /*
+       * PDF / legacy single-file.
+       * Jika file_path belum ada di state, refresh saat klik.
+       */
+      if (!downloadFilePath) {
+        const {
+          data: freshProduct,
+          error: freshProductError,
+        } =
+          await supabase
+            .from("store_products")
+            .select("file_path")
+            .eq("id", product.id)
+            .single();
+
+        if (freshProductError) {
+          throw freshProductError;
+        }
+
+        downloadFilePath =
+          (
+            freshProduct as {
+              file_path: string | null;
+            } | null
+          )?.file_path?.trim() ?? "";
+      }
+
+      if (!downloadFilePath) {
+        throw new Error(
+          "File produk belum tersedia untuk diunduh."
+        );
+      }
+
       const {
         data,
         error,
@@ -1679,7 +2076,7 @@ export default function ProductDetailScreen({
             "store-product-files"
           )
           .createSignedUrl(
-            detail.file_path,
+            downloadFilePath,
             300
           );
 
@@ -1694,7 +2091,7 @@ export default function ProductDetailScreen({
       }
 
       const originalName =
-        detail.file_path
+        downloadFilePath
           .split("/")
           .pop()
           ?.trim() ||
@@ -1811,7 +2208,7 @@ export default function ProductDetailScreen({
            * untuk kedua kalinya.
            */
           const canReusePdfCache =
-            detail.file_path
+            downloadFilePath
               .trim()
               .toLowerCase()
               .endsWith(".pdf") &&
@@ -1923,6 +2320,12 @@ export default function ProductDetailScreen({
               })
             );
 
+            setDownloadSuccessFileUri(
+              mediaUri
+            );
+            setDownloadSuccessFileMime(
+              mime
+            );
             setDownloadSuccessFileName(
               safeName
             );
@@ -1992,6 +2395,12 @@ export default function ProductDetailScreen({
             data.signedUrl
           );
 
+        setDownloadSuccessFileUri(
+          targetPath
+        );
+        setDownloadSuccessFileMime(
+          mime
+        );
         setDownloadSuccessFileName(safeName);
 
         return;
@@ -3011,14 +3420,14 @@ export default function ProductDetailScreen({
                 styles.deleteModalIcon,
                 {
                   backgroundColor:
-                    "#EFF6FF",
+                    "#ECFDF5",
                 },
               ]}
             >
-              <Download
+              <Check
                 size={23}
-                color="#2563EB"
-                strokeWidth={1.9}
+                color="#16A34A"
+                strokeWidth={2}
               />
             </View>
 
@@ -3111,15 +3520,37 @@ export default function ProductDetailScreen({
                   styles.deleteModalDeleteButton,
                   {
                     backgroundColor:
-                      "#2563EB",
+                      "#16A34A",
                   },
                 ]}
                 onPress={() => {
+                  const fileUri =
+                    downloadSuccessFileUri;
+                  const fileMime =
+                    downloadSuccessFileMime;
+
                   setDownloadSuccessFileName(
                     null
                   );
 
-                  void openDownloadFolder();
+                  if (!fileUri) {
+                    void openDownloadFolder();
+                    return;
+                  }
+
+                  void ReactNativeBlobUtil.android
+                    .actionViewIntent(
+                      fileUri,
+                      fileMime
+                    )
+                    .catch(error => {
+                      console.warn(
+                        "File download tidak dapat dibuka langsung:",
+                        error
+                      );
+
+                      void openDownloadFolder();
+                    });
                 }}
               >
                 <Download
