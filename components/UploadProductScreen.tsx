@@ -1160,17 +1160,36 @@ export default function UploadProductScreen({
 
 
     /*
-     * PDF
-     * File manager hanya menampilkan PDF.
+     * PDF / OFFICE_PICKER_V1
+     *
+     * Office hanya dipilih di client.
+     * Publish Office tetap diblok sampai
+     * converter server-side tersedia.
      */
+    const pickerTypes =
+      productFileKind === "office"
+        ? [
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.ms-excel",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-powerpoint",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+          ]
+        : [
+            "application/pdf",
+          ];
+
+
     const result =
       await DocumentPicker
         .getDocumentAsync({
-          type: [
-            "application/pdf",
-          ],
-          copyToCacheDirectory: true,
-          multiple: false,
+          type:
+            pickerTypes,
+          copyToCacheDirectory:
+            true,
+          multiple:
+            false,
         });
 
 
@@ -1185,13 +1204,70 @@ export default function UploadProductScreen({
     const asset =
       result.assets[0];
 
+    const fileName =
+      String(
+        asset.name ?? ""
+      ).trim();
+
+    const extension =
+      fileName
+        .split(".")
+        .pop()
+        ?.toLowerCase() ??
+      "";
+
+    if (
+      productFileKind === "office"
+    ) {
+      const allowedOfficeExtensions =
+        new Set([
+          "doc",
+          "docx",
+          "xls",
+          "xlsx",
+          "ppt",
+          "pptx",
+        ]);
+
+      if (
+        !allowedOfficeExtensions.has(
+          extension
+        )
+      ) {
+        setProductFile(null);
+
+        setErrorMessage(
+          "File Office harus DOC, DOCX, XLS, XLSX, PPT, atau PPTX."
+        );
+
+        return;
+      }
+    } else if (
+      extension !== "pdf"
+    ) {
+      setProductFile(null);
+
+      setErrorMessage(
+        "File produk harus berformat PDF."
+      );
+
+      return;
+    }
+
 
     setProductFile({
-      uri: asset.uri,
-      fileName: asset.name,
+      uri:
+        asset.uri,
+      fileName:
+        fileName ||
+        `produk-${Date.now()}.${extension || "bin"}`,
       mimeType:
         asset.mimeType ??
-        "application/pdf",
+        (
+          productFileKind === "pdf"
+            ? "application/pdf"
+            : "application/octet-stream"
+        ),
     });
   }
 
@@ -1231,6 +1307,23 @@ export default function UploadProductScreen({
     ) {
       setErrorMessage(
         "Pilih file produk terlebih dahulu."
+      );
+      return;
+    }
+
+    /*
+     * OFFICE_RAW_UPLOAD_GUARD_V1
+     *
+     * Jangan pernah kirim DOC/DOCX/XLS/XLSX/PPT/PPTX
+     * langsung ke store-product-files.
+     * Tahap berikutnya akan mengubah Office -> PDF
+     * melalui converter server-side.
+     */
+    if (
+      productFileKind === "office"
+    ) {
+      setErrorMessage(
+        "Konversi Word / Excel / PowerPoint ke PDF belum diaktifkan. File belum dipublikasikan."
       );
       return;
     }
