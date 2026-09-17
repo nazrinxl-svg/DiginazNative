@@ -1591,10 +1591,11 @@ export default function UploadProductScreen({
     }
 
     /*
-     * WORD_TO_PDF_GUARD_V1
+     * WORD_MANUAL_PREVIEW_GUARD_V1
      *
-     * DOC/DOCX sudah memakai jalur converter.
-     * Excel dan PowerPoint belum diaktifkan.
+     * Produk Word hanya menerima DOC/DOCX.
+     * Word asli digunakan untuk download,
+     * sedangkan PDF pratinjau digunakan untuk viewer.
      */
     if (
       productFileKind === "office" &&
