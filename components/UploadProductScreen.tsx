@@ -14,6 +14,7 @@ import {
 import {
   ArrowLeft,
   FileText,
+  Files,
   Image as ImageIcon,
   Upload,
   ChevronDown,
@@ -387,6 +388,7 @@ export default function UploadProductScreen({
     useState<
       "pdf" |
       "image" |
+      "office" |
       null
     >(null);
 
@@ -398,7 +400,10 @@ export default function UploadProductScreen({
 
 
   function selectProductFileKind(
-    kind: "pdf" | "image"
+    kind:
+      | "pdf"
+      | "image"
+      | "office"
   ) {
     setProductFileKind(kind);
     setShowProductFileKindMenu(false);
@@ -2334,7 +2339,9 @@ export default function UploadProductScreen({
                   ? "PDF"
                   : productFileKind === "image"
                     ? "Gambar"
-                    : "Pilih jenis file"}
+                    : productFileKind === "office"
+                      ? "Word / Excel / PowerPoint"
+                      : "Pilih jenis file"}
               </Text>
 
               {showProductFileKindMenu ? (
@@ -2375,7 +2382,7 @@ export default function UploadProductScreen({
                   >
                     <FileText
                       size={19}
-                      color="#2563EB"
+                      color="#DC2626"
                     />
                   </View>
 
@@ -2398,6 +2405,56 @@ export default function UploadProductScreen({
                       }
                     >
                       Dokumen PDF
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <View
+                  style={
+                    styles.fileTypeDivider
+                  }
+                />
+
+                <Pressable
+                  style={
+                    styles.fileTypeOption
+                  }
+                  onPress={() =>
+                    selectProductFileKind(
+                      "office"
+                    )
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileTypeOptionIcon
+                    }
+                  >
+                    <Files
+                      size={19}
+                      color="#F97316"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileTypeOptionInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTypeOptionTitle
+                      }
+                    >
+                      Word / Excel / PowerPoint
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileTypeOptionSub
+                      }
+                    >
+                      DOC, DOCX, XLS, XLSX, PPT, PPTX
                     </Text>
                   </View>
                 </Pressable>
