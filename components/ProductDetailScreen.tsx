@@ -159,6 +159,13 @@ export default function ProductDetailScreen({
       product.id
     );
   const openedAtRef = useRef(Date.now());
+
+  const productSlideScrollRef =
+    useRef<ScrollView | null>(null);
+
+  const productSlideDragStartXRef =
+    useRef(0);
+
   const imageStartedRef = useRef(new Map<string, number>());
   const sourceUrlsRef = useRef<Array<string | null>>([]);
 
@@ -287,6 +294,61 @@ export default function ProductDetailScreen({
       ) ??
       ""
   );
+
+  const [
+    creatorVerified,
+    setCreatorVerified,
+  ] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadCreatorVerification() {
+      const {
+        data,
+        error,
+      } = await supabase
+        .from(
+          "app_profile_verifications"
+        )
+        .select(
+          "auth_user_id"
+        )
+        .eq(
+          "auth_user_id",
+          product.creatorUserId
+        )
+        .maybeSingle();
+
+      if (!active) {
+        return;
+      }
+
+      if (error) {
+        console.warn(
+          "Status verifikasi creator gagal dimuat:",
+          error
+        );
+
+        setCreatorVerified(false);
+        return;
+      }
+
+      setCreatorVerified(
+        Boolean(
+          data?.auth_user_id
+        )
+      );
+    }
+
+    void loadCreatorVerification();
+
+    return () => {
+      active = false;
+    };
+  }, [
+    product.creatorUserId,
+  ]);
 
   console.log(
     "[AVATAR_DIAG][DETAIL_STATE]",
@@ -2788,13 +2850,7 @@ export default function ProductDetailScreen({
           Detail Produk
         </Text>
 
-        {!currentUserId ? (
-          <View
-            style={
-              styles.headerOwnerActions
-            }
-          />
-        ) : isOwner ? (
+        {isOwner ? (
           <View
             style={
               styles.headerOwnerActions
@@ -2847,6 +2903,47 @@ export default function ProductDetailScreen({
               styles.headerVisitorActions
             }
           >
+            <Pressable
+              style={
+                styles.creatorHeaderIdentity
+              }
+              onPress={() =>
+                onOpenCreatorProfile(
+                  product.creatorUserId
+                )
+              }
+              hitSlop={6}
+              accessibilityLabel="Buka profil pembuat"
+            >
+              <Text
+                style={
+                  styles.creatorHeaderName
+                }
+                numberOfLines={1}
+                allowFontScaling={false}
+              >
+                {String(
+                  product.author ||
+                  detail?.creator_name ||
+                  "Pengguna"
+                ).trim()}
+              </Text>
+
+              <View
+                style={[
+                  styles.creatorVerifiedBadge,
+                  !creatorVerified &&
+                    styles.creatorVerifiedBadgeHidden,
+                ]}
+              >
+                <Check
+                  size={7}
+                  color="#FFFFFF"
+                  strokeWidth={3.2}
+                />
+              </View>
+            </Pressable>
+
             <View
               style={
                 styles.creatorFollowWrap
@@ -3140,11 +3237,81 @@ export default function ProductDetailScreen({
               )
             ) : productSlides.length > 0 ? (
               <ScrollView
+                ref={productSlideScrollRef}
                 horizontal
-                pagingEnabled
                 nestedScrollEnabled
                 showsHorizontalScrollIndicator={false}
                 decelerationRate="fast"
+                snapToInterval={
+                  productGalleryWidth
+                }
+                snapToAlignment="start"
+                disableIntervalMomentum
+                onScrollBeginDrag={event => {
+                  productSlideDragStartXRef.current =
+                    event.nativeEvent
+                      .contentOffset.x;
+                }}
+                onScrollEndDrag={event => {
+                  const startX =
+                    productSlideDragStartXRef.current;
+
+                  const endX =
+                    event.nativeEvent
+                      .contentOffset.x;
+
+                  const deltaX =
+                    endX - startX;
+
+                  const startIndex =
+                    Math.round(
+                      startX /
+                        productGalleryWidth
+                    );
+
+                  let nextIndex =
+                    startIndex;
+
+                  /*
+                   * Swipe dibuat lebih sensitif.
+                   * Geser sekitar 18px sudah cukup
+                   * untuk pindah satu halaman.
+                   */
+                  if (
+                    Math.abs(deltaX) >= 18
+                  ) {
+                    nextIndex =
+                      startIndex +
+                      (
+                        deltaX > 0
+                          ? 1
+                          : -1
+                      );
+                  }
+
+                  nextIndex =
+                    Math.max(
+                      0,
+                      Math.min(
+                        nextIndex,
+                        productSlides.length - 1
+                      )
+                    );
+
+                  setActiveProductSlide(
+                    nextIndex
+                  );
+
+                  productSlideScrollRef
+                    .current
+                    ?.scrollTo({
+                      x:
+                        nextIndex *
+                        productGalleryWidth,
+                      y: 0,
+                      animated: true,
+                    });
+                }}
                 onMomentumScrollEnd={event => {
                   const nextIndex =
                     Math.round(
@@ -3699,7 +3866,7 @@ export default function ProductDetailScreen({
                   styles.deleteModalProductTitle
                 }
               >
-                Penyimpanan internal â€º Download
+                Penyimpanan internal ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Âº Download
               </Text>
             </View>
 
@@ -3934,13 +4101,16 @@ const styles = StyleSheet.create({
   },
 
   headerTitle: {
+    marginLeft: 10,
+    marginRight: "auto",
+    transform: [
+      { translateY: -2 },
+    ],
     fontFamily:
       "PlusJakartaSans_700Bold",
     fontSize: 13,
-    color: "#0F172A",    position: "absolute",
-    left: 84,
-    right: 84,
-    textAlign: "center",
+    color: "#0F172A",
+    textAlign: "left",
   },
 
   headerOwnerActions: {
@@ -3960,8 +4130,44 @@ const styles = StyleSheet.create({
 
   headerVisitorActions: {
     marginLeft: "auto",
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 7,
+  },
+
+  creatorHeaderIdentity: {
+    maxWidth: 105,
+    height: 18,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  creatorHeaderName: {
+    maxWidth: 84,
+    height: 16,
+    flexShrink: 1,
+    fontWeight: "600",
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#0F172A",
+    includeFontPadding: false,
+    textAlignVertical: "center",
+  },
+
+  creatorVerifiedBadge: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginLeft: 3,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+
+  creatorVerifiedBadgeHidden: {
+    opacity: 0,
   },
 
   creatorFollowWrap: {
