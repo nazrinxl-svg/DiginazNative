@@ -1652,37 +1652,54 @@ export default function ProductDetailScreen({
         );
       }
 
-      const {
-        error: trackingError,
-      } =
-        await supabase
-          .from(
-            "store_product_events"
-          )
-          .insert({
-            product_id:
-              product.id,
-            user_id:
-              currentUserId,
-            event_type:
-              "contact_creator",
-            source:
-              "mobile",
-            metadata: {
-              conversation_id:
-                conversationId,
-            },
-          });
-
-      if (trackingError) {
-        console.warn(
-          "Tracking contact_creator gagal:",
-          trackingError
-        );
-      }
-
+      /*
+       * CONTACT_CHAT_INSTANT_OPEN_V1
+       *
+       * Conversation ID sudah siap, jadi buka Chat
+       * sekarang. Analytics tidak boleh menahan navigasi.
+       */
       onOpenChat(
         conversationId
+      );
+
+      void (
+        async () => {
+          const {
+            error: trackingError,
+          } =
+            await supabase
+              .from(
+                "store_product_events"
+              )
+              .insert({
+                product_id:
+                  product.id,
+                user_id:
+                  currentUserId,
+                event_type:
+                  "contact_creator",
+                source:
+                  "mobile",
+                metadata: {
+                  conversation_id:
+                    conversationId,
+                },
+              });
+
+          if (trackingError) {
+            console.warn(
+              "Tracking contact_creator gagal:",
+              trackingError
+            );
+          }
+        }
+      )().catch(
+        error => {
+          console.warn(
+            "Tracking contact_creator gagal:",
+            error
+          );
+        }
       );
     } catch (error) {
       console.error(
@@ -2839,6 +2856,7 @@ export default function ProductDetailScreen({
         <Pressable
           style={styles.headerButton}
           onPress={onBack}
+          hitSlop={8}
         >
           <ArrowLeft
             size={20}
@@ -3473,6 +3491,12 @@ export default function ProductDetailScreen({
                   product.creatorUserId
                 )
               }
+              hitSlop={{
+                top: 8,
+                bottom: 8,
+                left: 6,
+                right: 6,
+              }}
             >
               <Text
                 style={styles.creator}

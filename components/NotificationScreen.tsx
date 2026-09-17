@@ -289,17 +289,21 @@ export default function NotificationScreen({
     );
   }
 
-  async function handlePress(
+  function handlePress(
     item: NotificationRow
   ) {
-    try {
-      await markRead(item);
-    } catch (error) {
-      console.warn(
-        "Tandai dibaca gagal:",
-        error
-      );
-    }
+    /*
+     * Navigasi harus langsung merespons tap.
+     * Update read_at berjalan di belakang.
+     */
+    void markRead(item).catch(
+      error => {
+        console.warn(
+          "Tandai dibaca gagal:",
+          error
+        );
+      }
+    );
 
     if (item.conversation_id) {
       onOpenChat(
@@ -404,6 +408,7 @@ export default function NotificationScreen({
         <Pressable
           onPress={onBack}
           style={styles.headerButton}
+          hitSlop={8}
         >
           <ArrowLeft
             size={20}
@@ -427,6 +432,7 @@ export default function NotificationScreen({
           onPress={() =>
             void markAllRead()
           }
+          hitSlop={8}
           disabled={
             unreadCount === 0 ||
             markingAll

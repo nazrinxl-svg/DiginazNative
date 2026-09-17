@@ -1767,6 +1767,7 @@ export default function UploadProductScreen({
           <Pressable
             style={styles.backButton}
             onPress={onClose}
+            hitSlop={8}
           >
             <ArrowLeft
               size={20}

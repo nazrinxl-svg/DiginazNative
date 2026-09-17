@@ -584,6 +584,7 @@ function ProductCard({
                   void handleLove();
                 }
               }}
+              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
               accessibilityLabel="Love produk"
             >
               <Heart
@@ -628,6 +629,7 @@ function ProductCard({
                 event.stopPropagation();
                 void handleSave();
               }}
+              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
               accessibilityLabel="Save produk"
             >
               {saveLoading ? (
@@ -675,6 +677,7 @@ function ProductCard({
                 event.stopPropagation();
                 onOpenComments();
               }}
+              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
               accessibilityLabel="Komentar produk"
             >
               <MessageCircle
@@ -709,6 +712,7 @@ function ProductCard({
                 event.stopPropagation();
                 void handleShareCard();
               }}
+              hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
               accessibilityLabel="Share produk"
             >
               <ShareIcon
@@ -805,6 +809,7 @@ function BottomNavigation({
       <Pressable
         style={styles.navItem}
         onPress={onStorePress}
+        hitSlop={{ top: 6, bottom: 6 }}
       >
         <Home
           size={21}
@@ -825,6 +830,7 @@ function BottomNavigation({
       <Pressable
         style={styles.navItem}
         onPress={onChatPress}
+        hitSlop={{ top: 6, bottom: 6 }}
       >
         <MessageCircle
           size={21}
@@ -845,6 +851,7 @@ function BottomNavigation({
       <Pressable
         style={styles.navItem}
         onPress={onUploadPress}
+        hitSlop={{ top: 6, bottom: 6 }}
       >
         <Plus
           size={21}
@@ -867,6 +874,7 @@ function BottomNavigation({
         onPress={
           onNotificationPress
         }
+        hitSlop={{ top: 6, bottom: 6 }}
       >
         <View
           style={
@@ -923,6 +931,7 @@ function BottomNavigation({
       <Pressable
         style={styles.navItem}
         onPress={onProfilePress}
+        hitSlop={{ top: 6, bottom: 6 }}
       >
         <UserRound
           size={21}
@@ -1789,7 +1798,7 @@ function StoreHome() {
   }, [homeAvatarUrl]);
 
 
-  async function openProfileReady() {
+  function openProfileReady() {
     if (
       profileOpenPreparingRef.current
     ) {
@@ -1799,143 +1808,33 @@ function StoreHome() {
     profileOpenPreparingRef.current =
       true;
 
-    try {
-      let preparedName =
-        homeProfileName.trim();
+    /*
+     * PROFILE_INSTANT_OPEN_V1
+     *
+     * Jangan tahan navigasi karena query jaringan
+     * atau Image.prefetch. Gunakan snapshot Store
+     * yang sudah tersedia untuk frame pertama.
+     * ProfileScreen tetap refresh datanya sendiri.
+     */
+    setProfilePreparedSnapshot({
+      name:
+        homeProfileName.trim(),
+      avatarUrl:
+        homeAvatarUrl.trim(),
+      bio:
+        homeProfileBio.trim(),
+      username:
+        homeProfileUsername.trim(),
+    });
 
-      let preparedAvatar =
-        homeAvatarUrl.trim();
+    openMainTab(
+      "profile"
+    );
 
-      let preparedBio =
-        homeProfileBio.trim();
-
-      let preparedUsername =
-        homeProfileUsername.trim();
-
-      /*
-       * Kalau salah satunya belum siap,
-       * baca app_profiles sebelum pindah halaman.
-       */
-      if (
-        !preparedName ||
-        !preparedAvatar
-      ) {
-        let userId =
-          storeUserId;
-
-        if (!userId) {
-          const {
-            data: sessionData,
-          } =
-            await supabase.auth
-              .getSession();
-
-          userId =
-            sessionData.session
-              ?.user.id ?? null;
-        }
-
-        if (userId) {
-          const {
-            data,
-            error,
-          } =
-            await supabase
-              .from(
-                "app_profiles"
-              )
-              .select(
-                "full_name,avatar_url,bio,username"
-              )
-              .eq(
-                "auth_user_id",
-                userId
-              )
-              .maybeSingle();
-
-          if (error) {
-            throw error;
-          }
-
-          preparedName =
-            String(
-              data?.full_name ?? ""
-            ).trim();
-
-          preparedAvatar =
-            String(
-              data?.avatar_url ?? ""
-            ).trim();
-
-          preparedBio =
-            String(
-              data?.bio ?? ""
-            ).trim();
-
-          preparedUsername =
-            String(
-              data?.username ?? ""
-            ).trim();
-
-          setHomeProfileName(
-            preparedName
-          );
-
-          setHomeAvatarUrl(
-            preparedAvatar
-          );
-
-          setHomeProfileBio(
-            preparedBio
-          );
-
-          setHomeProfileUsername(
-            preparedUsername
-          );
-        }
-      }
-
-      /*
-       * Tunggu bitmap avatar benar-benar masuk cache.
-       */
-      if (preparedAvatar) {
-        try {
-          await Image.prefetch(
-            preparedAvatar
-          );
-        }
-        catch {}
-      }
-
-      /*
-       * Snapshot final untuk first render ProfileScreen.
-       * Jangan biarkan ProfileScreen mount dengan avatar kosong.
-       */
-      setProfilePreparedSnapshot({
-        name: preparedName,
-        avatarUrl: preparedAvatar,
-        bio: preparedBio,
-        username: preparedUsername,
-      });
-
-      openMainTab(
-        "profile"
-      );
-    }
-    catch (error) {
-      console.warn(
-        "Persiapan Profil gagal:",
-        error
-      );
-
-      openMainTab(
-        "profile"
-      );
-    }
-    finally {
+    requestAnimationFrame(() => {
       profileOpenPreparingRef.current =
         false;
-    }
+    });
   }
 
 
@@ -2636,6 +2535,7 @@ function StoreHome() {
                 }}
                 accessibilityRole="button"
                 accessibilityLabel="Buka profil"
+                hitSlop={8}
               >
                 {homeAvatarUrl ? (
                   <Image
