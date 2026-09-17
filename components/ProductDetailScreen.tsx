@@ -78,6 +78,9 @@ type ProductDetailRow = {
   description: string | null;
   thumbnail_path: string | null;
   file_path: string | null;
+  original_file_path: string | null;
+  original_file_name: string | null;
+  original_mime_type: string | null;
   download_count: number | null;
   updated_at: string | null;
 };
@@ -516,7 +519,7 @@ export default function ProductDetailScreen({
         } = await supabase
           .from("store_products")
           .select(
-            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,file_path,download_count,updated_at"
+            "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,original_price_amount,description,thumbnail_path,file_path,original_file_path,original_file_name,original_mime_type,download_count,updated_at"
           )
           .eq("id", product.id)
           .single();
@@ -1888,13 +1891,49 @@ export default function ProductDetailScreen({
     setProductAccessLoading(true);
 
     try {
-      let downloadFilePath =
+      /*
+       * OFFICE_ORIGINAL_DOWNLOAD_V1
+       *
+       * file_path = PDF untuk viewer.
+       * original_file_path = Word asli untuk Download.
+       */
+      const previewFilePath =
         detail?.file_path?.trim() ?? "";
 
+      let downloadFilePath =
+        previewFilePath;
+
+      let downloadBucket =
+        "store-product-files";
+
+      let preferredFileName =
+        "";
+
+      let preferredMime =
+        "";
+
       const detailIsPdf =
-        downloadFilePath
+        previewFilePath
           .toLowerCase()
           .endsWith(".pdf");
+
+      if (
+        detail?.original_file_path?.trim()
+      ) {
+        downloadFilePath =
+          detail.original_file_path.trim();
+
+        downloadBucket =
+          "store-product-originals";
+
+        preferredFileName =
+          detail.original_file_name?.trim() ??
+          "";
+
+        preferredMime =
+          detail.original_mime_type?.trim() ??
+          "";
+      }
 
       /*
        * MULTIPAGE_IMAGE_DOWNLOAD_V1
@@ -2242,7 +2281,9 @@ export default function ProductDetailScreen({
         } =
           await supabase
             .from("store_products")
-            .select("file_path")
+            .select(
+              "file_path,original_file_path,original_file_name,original_mime_type"
+            )
             .eq("id", product.id)
             .single();
 
@@ -2250,12 +2291,40 @@ export default function ProductDetailScreen({
           throw freshProductError;
         }
 
-        downloadFilePath =
-          (
-            freshProduct as {
-              file_path: string | null;
-            } | null
-          )?.file_path?.trim() ?? "";
+        const fresh =
+          freshProduct as {
+            file_path: string | null;
+            original_file_path:
+              string | null;
+            original_file_name:
+              string | null;
+            original_mime_type:
+              string | null;
+          } | null;
+
+        const freshOriginalPath =
+          fresh?.original_file_path?.trim() ??
+          "";
+
+        if (freshOriginalPath) {
+          downloadFilePath =
+            freshOriginalPath;
+
+          downloadBucket =
+            "store-product-originals";
+
+          preferredFileName =
+            fresh?.original_file_name?.trim() ??
+            "";
+
+          preferredMime =
+            fresh?.original_mime_type?.trim() ??
+            "";
+        } else {
+          downloadFilePath =
+            fresh?.file_path?.trim() ??
+            "";
+        }
       }
 
       if (!downloadFilePath) {
@@ -2270,7 +2339,7 @@ export default function ProductDetailScreen({
       } =
         await supabase.storage
           .from(
-            "store-product-files"
+            downloadBucket
           )
           .createSignedUrl(
             downloadFilePath,
@@ -2288,6 +2357,7 @@ export default function ProductDetailScreen({
       }
 
       const originalName =
+        preferredFileName ||
         downloadFilePath
           .split("/")
           .pop()
@@ -2373,9 +2443,10 @@ export default function ProductDetailScreen({
       };
 
       const mime =
+        preferredMime ||
         mimeByExtension[
           extension as keyof typeof mimeByExtension
-        ] ??
+        ] ||
         "application/octet-stream";
 
       if (Platform.OS === "android") {

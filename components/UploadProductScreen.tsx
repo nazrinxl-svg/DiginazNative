@@ -156,6 +156,17 @@ export default function UploadProductScreen({
   const [productFile, setProductFile] =
     useState<PickedAsset | null>(null);
 
+  /*
+   * WORD_MANUAL_PREVIEW_V1
+   * Word asli = productFile
+   * PDF preview = previewPdfFile
+   */
+  const [
+    previewPdfFile,
+    setPreviewPdfFile,
+  ] =
+    useState<PickedAsset | null>(null);
+
   const [productPages, setProductPages] =
     useState<PickedAsset[]>([]);
 
@@ -412,6 +423,7 @@ export default function UploadProductScreen({
     // Hindari file lama tetap terbaca
     // setelah jenis file diganti.
     setProductFile(null);
+    setPreviewPdfFile(null);
     setProductPages([]);
 
     setErrorMessage("");
@@ -1171,10 +1183,6 @@ export default function UploadProductScreen({
         ? [
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.ms-excel",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "application/vnd.ms-powerpoint",
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
           ]
         : [
             "application/pdf",
@@ -1223,10 +1231,6 @@ export default function UploadProductScreen({
         new Set([
           "doc",
           "docx",
-          "xls",
-          "xlsx",
-          "ppt",
-          "pptx",
         ]);
 
       if (
@@ -1237,7 +1241,7 @@ export default function UploadProductScreen({
         setProductFile(null);
 
         setErrorMessage(
-          "File Office harus DOC, DOCX, XLS, XLSX, PPT, atau PPTX."
+          "File Word harus berformat DOC atau DOCX."
         );
 
         return;
@@ -1269,6 +1273,281 @@ export default function UploadProductScreen({
             : "application/octet-stream"
         ),
     });
+  }
+
+  async function choosePreviewPdf() {
+    setErrorMessage("");
+
+    try {
+      const result =
+        await DocumentPicker
+          .getDocumentAsync({
+            type: [
+              "application/pdf",
+            ],
+            copyToCacheDirectory:
+              true,
+            multiple:
+              false,
+          });
+
+      if (
+        result.canceled ||
+        !result.assets ||
+        result.assets.length === 0
+      ) {
+        return;
+      }
+
+      const asset =
+        result.assets[0];
+
+      const fileName =
+        String(
+          asset.name ?? ""
+        ).trim();
+
+      const extension =
+        fileName
+          .split(".")
+          .pop()
+          ?.toLowerCase()
+          .replace(
+            /[^a-z0-9]/g,
+            ""
+          ) ?? "";
+
+      if (extension !== "pdf") {
+        setPreviewPdfFile(null);
+
+        setErrorMessage(
+          "File pratinjau harus berformat PDF."
+        );
+
+        return;
+      }
+
+      setPreviewPdfFile({
+        uri:
+          asset.uri,
+
+        fileName:
+          fileName ||
+          `preview-${Date.now()}.pdf`,
+
+        mimeType:
+          asset.mimeType ??
+          "application/pdf",
+      });
+    }
+    catch (error) {
+      console.warn(
+        "Pilih PDF pratinjau gagal:",
+        error
+      );
+
+      setErrorMessage(
+        "PDF pratinjau belum dapat dipilih."
+      );
+    }
+  }
+
+
+  async function uploadWordWithPreview(
+    userId: string,
+    productId: string,
+    wordAsset: PickedAsset,
+    previewAsset: PickedAsset
+  ): Promise<{
+    pdfPath: string;
+    originalPath: string;
+    originalFileName: string;
+    originalMimeType: string;
+  }> {
+    const wordExtension =
+      getExtension(
+        wordAsset,
+        ""
+      );
+
+    if (
+      wordExtension !== "doc" &&
+      wordExtension !== "docx"
+    ) {
+      throw new Error(
+        "File Word harus berformat DOC atau DOCX."
+      );
+    }
+
+    const previewExtension =
+      getExtension(
+        previewAsset,
+        ""
+      );
+
+    if (
+      previewExtension !== "pdf"
+    ) {
+      throw new Error(
+        "File pratinjau harus berformat PDF."
+      );
+    }
+
+
+    const batchId =
+      Date.now();
+
+    const originalFileName =
+      wordAsset.fileName ??
+      `document-${batchId}.${wordExtension}`;
+
+    const cleanOriginalName =
+      safeFileName(
+        originalFileName
+      );
+
+    const previewFileName =
+      previewAsset.fileName ??
+      `preview-${batchId}.pdf`;
+
+    const cleanPreviewName =
+      safeFileName(
+        previewFileName
+      );
+
+
+    const originalPath =
+      `${userId}/${productId}/` +
+      `original-${batchId}-${cleanOriginalName}`;
+
+    const pdfPath =
+      `${userId}/${productId}/` +
+      `file-${batchId}-${cleanPreviewName}`;
+
+
+    const originalMimeType =
+      wordExtension === "docx"
+        ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        : "application/msword";
+
+
+    const wordBuffer =
+      await fetch(
+        wordAsset.uri
+      ).then(
+        response =>
+          response.arrayBuffer()
+      );
+
+    if (
+      wordBuffer.byteLength <= 0
+    ) {
+      throw new Error(
+        "File Word kosong atau tidak dapat dibaca."
+      );
+    }
+
+
+    const previewBuffer =
+      await fetch(
+        previewAsset.uri
+      ).then(
+        response =>
+          response.arrayBuffer()
+      );
+
+    if (
+      previewBuffer.byteLength <= 0
+    ) {
+      throw new Error(
+        "PDF pratinjau kosong atau tidak dapat dibaca."
+      );
+    }
+
+
+    let originalUploaded =
+      false;
+
+    try {
+      const {
+        error:
+          originalUploadError,
+      } =
+        await supabase.storage
+          .from(
+            "store-product-originals"
+          )
+          .upload(
+            originalPath,
+            wordBuffer,
+            {
+              contentType:
+                originalMimeType,
+
+              upsert:
+                false,
+            }
+          );
+
+      if (
+        originalUploadError
+      ) {
+        throw originalUploadError;
+      }
+
+      originalUploaded =
+        true;
+
+
+      const {
+        error:
+          previewUploadError,
+      } =
+        await supabase.storage
+          .from(
+            "store-product-files"
+          )
+          .upload(
+            pdfPath,
+            previewBuffer,
+            {
+              contentType:
+                "application/pdf",
+
+              upsert:
+                false,
+            }
+          );
+
+      if (
+        previewUploadError
+      ) {
+        throw previewUploadError;
+      }
+
+
+      return {
+        pdfPath,
+        originalPath,
+        originalFileName,
+        originalMimeType,
+      };
+    }
+    catch (error) {
+      if (
+        originalUploaded
+      ) {
+        await supabase.storage
+          .from(
+            "store-product-originals"
+          )
+          .remove([
+            originalPath,
+          ]);
+      }
+
+      throw error;
+    }
   }
 
   async function handleUpload() {
@@ -1312,20 +1591,30 @@ export default function UploadProductScreen({
     }
 
     /*
-     * OFFICE_RAW_UPLOAD_GUARD_V1
+     * WORD_TO_PDF_GUARD_V1
      *
-     * Jangan pernah kirim DOC/DOCX/XLS/XLSX/PPT/PPTX
-     * langsung ke store-product-files.
-     * Tahap berikutnya akan mengubah Office -> PDF
-     * melalui converter server-side.
+     * DOC/DOCX sudah memakai jalur converter.
+     * Excel dan PowerPoint belum diaktifkan.
      */
     if (
-      productFileKind === "office"
+      productFileKind === "office" &&
+      productFile
     ) {
-      setErrorMessage(
-        "Konversi Word / Excel / PowerPoint ke PDF belum diaktifkan. File belum dipublikasikan."
-      );
-      return;
+      const officeExtension =
+        getExtension(
+          productFile,
+          ""
+        );
+
+      if (
+        officeExtension !== "doc" &&
+        officeExtension !== "docx"
+      ) {
+        setErrorMessage(
+          "File Word harus berformat DOC atau DOCX."
+        );
+        return;
+      }
     }
 
     if (
@@ -1358,11 +1647,42 @@ export default function UploadProductScreen({
       return;
     }
 
+    if (
+      productFileKind === "office" &&
+      !productFile
+    ) {
+      setErrorMessage(
+        "Pilih file Word terlebih dahulu."
+      );
+
+      return;
+    }
+
+    if (
+      productFileKind === "office" &&
+      !previewPdfFile
+    ) {
+      setErrorMessage(
+        "Pilih PDF pratinjau terlebih dahulu."
+      );
+
+      return;
+    }
+
     setSubmitting(true);
 
     let productId: string | null = null;
     let thumbnailPath: string | null = null;
     let filePath: string | null = null;
+
+    let originalFilePath:
+      string | null = null;
+
+    let originalFileName:
+      string | null = null;
+
+    let originalMimeType:
+      string | null = null;
 
     try {
       const {
@@ -1389,7 +1709,7 @@ export default function UploadProductScreen({
         } = await supabase
           .from("store_products")
           .select(
-            "id,creator_user_id,thumbnail_path,file_path"
+            "id,creator_user_id,thumbnail_path,file_path,original_file_path,original_file_name,original_mime_type"
           )
           .eq("id", editProductId)
           .eq("creator_user_id", user.id)
@@ -1404,6 +1724,18 @@ export default function UploadProductScreen({
 
         let nextFilePath =
           existing.file_path ?? null;
+
+        let nextOriginalFilePath =
+          existing.original_file_path ??
+          null;
+
+        let nextOriginalFileName =
+          existing.original_file_name ??
+          null;
+
+        let nextOriginalMimeType =
+          existing.original_mime_type ??
+          null;
 
         if (thumbnail) {
           const extension =
@@ -1449,40 +1781,96 @@ export default function UploadProductScreen({
           productFile &&
           productFileKind !== "image"
         ) {
-          const rawFileName =
-            productFile.fileName ??
-            `produk-${Date.now()}`;
+          if (
+            productFileKind ===
+              "office"
+          ) {
+            if (!previewPdfFile) {
+              throw new Error(
+                "Pilih PDF pratinjau terlebih dahulu."
+              );
+            }
 
-          const cleanFileName =
-            safeFileName(rawFileName);
-
-          filePath =
-            `${user.id}/${editProductId}/` +
-            `file-${Date.now()}-${cleanFileName}`;
-
-          const fileBuffer =
-            await fetch(productFile.uri)
-              .then((response) =>
-                response.arrayBuffer()
+            const converted =
+              await uploadWordWithPreview(
+                user.id,
+                editProductId,
+                productFile,
+                previewPdfFile
               );
 
-          const {
-            error: fileError,
-          } = await supabase.storage
-            .from("store-product-files")
-            .upload(
-              filePath,
-              fileBuffer,
-              {
-                contentType:
-                  productFile.mimeType ??
-                  "application/octet-stream",
-                upsert: false,
-              }
-            );
+            filePath =
+              converted.pdfPath;
 
-          if (fileError) {
-            throw fileError;
+            originalFilePath =
+              converted.originalPath;
+
+            originalFileName =
+              converted.originalFileName;
+
+            originalMimeType =
+              converted.originalMimeType;
+
+            nextOriginalFilePath =
+              originalFilePath;
+
+            nextOriginalFileName =
+              originalFileName;
+
+            nextOriginalMimeType =
+              originalMimeType;
+          } else {
+            nextOriginalFilePath =
+              null;
+
+            nextOriginalFileName =
+              null;
+
+            nextOriginalMimeType =
+              null;
+            const rawFileName =
+              productFile.fileName ??
+              `produk-${Date.now()}`;
+
+            const cleanFileName =
+              safeFileName(
+                rawFileName
+              );
+
+            filePath =
+              `${user.id}/${editProductId}/` +
+              `file-${Date.now()}-${cleanFileName}`;
+
+            const fileBuffer =
+              await fetch(
+                productFile.uri
+              ).then(
+                response =>
+                  response.arrayBuffer()
+              );
+
+            const {
+              error: fileError,
+            } =
+              await supabase.storage
+                .from(
+                  "store-product-files"
+                )
+                .upload(
+                  filePath,
+                  fileBuffer,
+                  {
+                    contentType:
+                      productFile.mimeType ??
+                      "application/octet-stream",
+                    upsert:
+                      false,
+                  }
+                );
+
+            if (fileError) {
+              throw fileError;
+            }
           }
 
           nextFilePath =
@@ -1516,6 +1904,15 @@ export default function UploadProductScreen({
               productPages
             );
 
+          nextOriginalFilePath =
+            null;
+
+          nextOriginalFileName =
+            null;
+
+          nextOriginalMimeType =
+            null;
+
           nextFilePath =
             editImageSync
               .firstStoragePath;
@@ -1541,6 +1938,12 @@ export default function UploadProductScreen({
               nextThumbnailPath,
             file_path:
               nextFilePath,
+            original_file_path:
+              nextOriginalFilePath,
+            original_file_name:
+              nextOriginalFileName,
+            original_mime_type:
+              nextOriginalMimeType,
             status: "published",
           })
           .eq("id", editProductId)
@@ -1633,6 +2036,33 @@ export default function UploadProductScreen({
             console.warn(
               "File lama belum terhapus:",
               cleanupFileError
+            );
+          }
+        }
+
+        if (
+          existing.original_file_path &&
+          existing.original_file_path !==
+            nextOriginalFilePath
+        ) {
+          const {
+            error:
+              cleanupOriginalFileError,
+          } =
+            await supabase.storage
+              .from(
+                "store-product-originals"
+              )
+              .remove([
+                existing.original_file_path,
+              ]);
+
+          if (
+            cleanupOriginalFileError
+          ) {
+            console.warn(
+              "File Word lama belum terhapus:",
+              cleanupOriginalFileError
             );
           }
         }
@@ -1731,40 +2161,79 @@ export default function UploadProductScreen({
         }
       }
 
-      const rawFileName =
-        productFile.fileName ??
-        `produk-${Date.now()}`;
+      if (
+        productFileKind ===
+          "office"
+      ) {
+        if (!previewPdfFile) {
+          throw new Error(
+            "Pilih PDF pratinjau terlebih dahulu."
+          );
+        }
 
-      const cleanFileName =
-        safeFileName(rawFileName);
-
-      filePath =
-        `${user.id}/${productId}/` +
-        `file-${Date.now()}-${cleanFileName}`;
-
-      const fileBuffer =
-        await fetch(productFile.uri)
-          .then((response) =>
-            response.arrayBuffer()
+        const converted =
+          await uploadWordWithPreview(
+            user.id,
+            created.id,
+            productFile,
+            previewPdfFile
           );
 
-      const {
-        error: fileError,
-      } = await supabase.storage
-        .from("store-product-files")
-        .upload(
-          filePath,
-          fileBuffer,
-          {
-            contentType:
-              productFile.mimeType ??
-              "application/octet-stream",
-            upsert: false,
-          }
-        );
+        filePath =
+          converted.pdfPath;
 
-      if (fileError) {
-        throw fileError;
+        originalFilePath =
+          converted.originalPath;
+
+        originalFileName =
+          converted.originalFileName;
+
+        originalMimeType =
+          converted.originalMimeType;
+      } else {
+        const rawFileName =
+          productFile.fileName ??
+          `produk-${Date.now()}`;
+
+        const cleanFileName =
+          safeFileName(
+            rawFileName
+          );
+
+        filePath =
+          `${user.id}/${productId}/` +
+          `file-${Date.now()}-${cleanFileName}`;
+
+        const fileBuffer =
+          await fetch(
+            productFile.uri
+          ).then(
+            response =>
+              response.arrayBuffer()
+          );
+
+        const {
+          error: fileError,
+        } =
+          await supabase.storage
+            .from(
+              "store-product-files"
+            )
+            .upload(
+              filePath,
+              fileBuffer,
+              {
+                contentType:
+                  productFile.mimeType ??
+                  "application/octet-stream",
+                upsert:
+                  false,
+              }
+            );
+
+        if (fileError) {
+          throw fileError;
+        }
       }
 
       if (
@@ -1791,6 +2260,12 @@ export default function UploadProductScreen({
           thumbnail_path:
             thumbnailPath,
           file_path: filePath,
+          original_file_path:
+            originalFilePath,
+          original_file_name:
+            originalFileName,
+          original_mime_type:
+            originalMimeType,
           status: "published",
         })
         .eq("id", productId);
@@ -1822,6 +2297,16 @@ export default function UploadProductScreen({
         await supabase.storage
           .from("store-product-files")
           .remove([filePath]);
+      }
+
+      if (originalFilePath) {
+        await supabase.storage
+          .from(
+            "store-product-originals"
+          )
+          .remove([
+            originalFilePath,
+          ]);
       }
 
       if (productId) {
@@ -2434,7 +2919,7 @@ export default function UploadProductScreen({
                   : productFileKind === "image"
                     ? "Gambar"
                     : productFileKind === "office"
-                      ? "Word / Excel / PowerPoint"
+                      ? "Word"
                       : "Pilih jenis file"}
               </Text>
 
@@ -2540,7 +3025,7 @@ export default function UploadProductScreen({
                         styles.fileTypeOptionTitle
                       }
                     >
-                      Word / Excel / PowerPoint
+                      Word
                     </Text>
 
                     <Text
@@ -2548,7 +3033,7 @@ export default function UploadProductScreen({
                         styles.fileTypeOptionSub
                       }
                     >
-                      DOC, DOCX, XLS, XLSX, PPT, PPTX
+                      DOC, DOCX
                     </Text>
                   </View>
                 </Pressable>
@@ -2803,11 +3288,68 @@ export default function UploadProductScreen({
                     {productFile?.fileName ??
                       (editProductId
                         ? "Tetap gunakan file lama"
-                        : "PDF saja")}
+                        : productFileKind ===
+                            "office"
+                          ? "Pilih file Word"
+                          : "PDF saja")}
                   </Text>
                 </View>
               </Pressable>
             )}
+
+            {productFileKind ===
+            "office" ? (
+              <View style={styles.field}>
+                <Text style={styles.label}>
+                  PDF Pratinjau
+                </Text>
+
+                <Pressable
+                  style={styles.filePicker}
+                  onPress={
+                    choosePreviewPdf
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileIcon
+                    }
+                  >
+                    <FileText
+                      size={20}
+                      color="#2563EB"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTitle
+                      }
+                    >
+                      {previewPdfFile
+                        ? "PDF pratinjau dipilih"
+                        : "Pilih PDF pratinjau"}
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileName
+                      }
+                      numberOfLines={1}
+                    >
+                      {previewPdfFile
+                        ?.fileName ??
+                        "PDF untuk tampilan rapi di Diginaz"}
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.field}>
