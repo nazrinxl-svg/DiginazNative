@@ -1,3 +1,4 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { formatEngagementCount, getDummyCardEngagement } from "./lib/storeEngagement";
 import { useUnreadNotificationCount } from "./lib/useUnreadNotificationCount";
 import React, { useEffect, useRef, useState } from "react";
@@ -43,6 +44,7 @@ import ProfileScreen from "./components/ProfileScreen";
 import PublicProfileScreen from "./components/PublicProfileScreen";
 import UploadProductScreen from "./components/UploadProductScreen";
 import { supabase } from "./lib/supabase";
+import { warmCreatorAvatar } from "./lib/creatorAvatarPreview";
 import {
   fetchPublishedStoreProductById,
   fetchPublishedStoreProducts,
@@ -68,6 +70,47 @@ import {
  */
 const sharedStorePreviewSession =
   createStoreProductPreviewSession();
+
+
+/*
+ * CREATOR_AVATAR_PREWARM_V6
+ *
+ * Avatar creator dihangatkan sejak
+ * daftar Store tersedia, bukan menunggu
+ * Product Detail dibuka.
+ */
+function warmStoreCreatorAvatars(
+  items: StoreProductCardItem[]
+) {
+  const creatorIds =
+    Array.from(
+      new Set(
+        items
+          .map(
+            item =>
+              item.creatorUserId
+          )
+          .filter(
+            userId =>
+              Boolean(userId)
+          )
+      )
+    )
+      .slice(
+        0,
+        24
+      );
+
+
+  void Promise.allSettled(
+    creatorIds.map(
+      creatorUserId =>
+        warmCreatorAvatar(
+          creatorUserId
+        )
+    )
+  );
+}
 
 const SCREEN_WIDTH =
   Dimensions.get("window").width;
@@ -388,7 +431,7 @@ function ProductCard({
           product.title +
           "\n" +
           product.subject +
-          " Ã‚Â· " +
+          " ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¾Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â· " +
           product.level +
           "\n" +
           "Oleh " +
@@ -922,6 +965,11 @@ function StoreHome() {
   ] = useState("");
 
   const [
+    homeAvatarReady,
+    setHomeAvatarReady,
+  ] = useState(false);
+
+  const [
     homeProfileName,
     setHomeProfileName,
   ] = useState("");
@@ -935,6 +983,16 @@ function StoreHome() {
     homeProfileUsername,
     setHomeProfileUsername,
   ] = useState("");
+
+  const [
+    profilePreparedSnapshot,
+    setProfilePreparedSnapshot,
+  ] = useState<{
+    name: string;
+    avatarUrl: string;
+    bio: string;
+    username: string;
+  } | null>(null);
 
   const [
     homeFollowerCount,
@@ -1063,6 +1121,51 @@ function StoreHome() {
   useEffect(() => {
     let active = true;
 
+    async function hydrateHomeAvatarCache() {
+      try {
+        const cachedAvatar =
+          String(
+            await AsyncStorage.getItem(
+              "diginaz:home-avatar-url:v1"
+            ) ?? ""
+          ).trim();
+
+        if (
+          !active ||
+          !cachedAvatar
+        ) {
+          return;
+        }
+
+        try {
+          await Image.prefetch(
+            cachedAvatar
+          );
+        } catch {}
+
+        if (!active) {
+          return;
+        }
+
+        /*
+         * Cache hanya untuk memanaskan bitmap.
+         * Jangan tampilkan URL cache sebelum server
+         * memastikan avatar terbaru milik user.
+         */
+      } catch {}
+    }
+
+    void hydrateHomeAvatarCache();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+
+  useEffect(() => {
+    let active = true;
+
     async function loadHomeAvatar() {
       if (
         !storeUserId ||
@@ -1092,11 +1195,39 @@ function StoreHome() {
           return;
         }
 
-        setHomeAvatarUrl(
+        const nextHomeAvatarUrl =
           String(
             data?.avatar_url ?? ""
-          ).trim()
+          ).trim();
+
+        if (nextHomeAvatarUrl) {
+          try {
+            await Image.prefetch(
+              nextHomeAvatarUrl
+            );
+          } catch {}
+        }
+
+        if (!active) {
+          return;
+        }
+
+        setHomeAvatarUrl(
+          nextHomeAvatarUrl
         );
+
+        setHomeAvatarReady(true);
+
+        if (nextHomeAvatarUrl) {
+          void AsyncStorage.setItem(
+            "diginaz:home-avatar-url:v1",
+            nextHomeAvatarUrl
+          );
+        } else {
+          void AsyncStorage.removeItem(
+            "diginaz:home-avatar-url:v1"
+          );
+        }
 
         setHomeProfileName(
           String(
@@ -1122,7 +1253,7 @@ function StoreHome() {
         );
 
         if (active) {
-          setHomeAvatarUrl("");
+          setHomeAvatarReady(true);
         }
       }
     }
@@ -1776,6 +1907,17 @@ function StoreHome() {
         catch {}
       }
 
+      /*
+       * Snapshot final untuk first render ProfileScreen.
+       * Jangan biarkan ProfileScreen mount dengan avatar kosong.
+       */
+      setProfilePreparedSnapshot({
+        name: preparedName,
+        avatarUrl: preparedAvatar,
+        bio: preparedBio,
+        username: preparedUsername,
+      });
+
       openMainTab(
         "profile"
       );
@@ -1998,6 +2140,10 @@ function StoreHome() {
           cachedProducts
         );
 
+        warmStoreCreatorAvatars(
+          cachedProducts
+        );
+
         setLoadingProducts(false);
       }
     }
@@ -2009,6 +2155,10 @@ function StoreHome() {
         await fetchPublishedStoreProducts(handleFirstPagesReady);
 
       setProducts(
+        mappedProducts
+      );
+
+      warmStoreCreatorAvatars(
         mappedProducts
       );
 
@@ -2103,15 +2253,23 @@ function StoreHome() {
         >
           <ProfileScreen
             initialName={
+              profilePreparedSnapshot
+                ?.name ??
               homeProfileName
             }
             initialAvatarUrl={
+              profilePreparedSnapshot
+                ?.avatarUrl ??
               homeAvatarUrl
             }
             initialBio={
+              profilePreparedSnapshot
+                ?.bio ??
               homeProfileBio
             }
             initialUsername={
+              profilePreparedSnapshot
+                ?.username ??
               homeProfileUsername
             }
             initialSavedProductIds={
@@ -2291,6 +2449,7 @@ function StoreHome() {
     return (
       <ProductDetailScreen
         key={selectedProduct.id}
+        initialCurrentUserId={storeUserId}
         product={{
           ...selectedProduct,
           firstPageStoragePath: firstPagePathFor(selectedProduct),
@@ -2429,6 +2588,14 @@ function StoreHome() {
     );
   }
 
+  // DASHBOARD_AVATAR_FIRST_FRAME_GATE
+  // Dashboard baru dirender setelah avatar awal sudah diketahui.
+  if (!homeAvatarReady) {
+    return (
+      <View style={styles.screen} />
+    );
+  }
+
   return (
     <SafeAreaView
       style={styles.safeArea}
@@ -2480,13 +2647,11 @@ function StoreHome() {
                     }
                     resizeMode="cover"
                   />
-                ) : (
-                  <UserRound
+                ) : homeAvatarReady ? (<UserRound
                     size={20}
                     color="#2563EB"
                     strokeWidth={1.8}
-                  />
-                )}
+                  />) : null}
               </Pressable>
             </View>
           </View>

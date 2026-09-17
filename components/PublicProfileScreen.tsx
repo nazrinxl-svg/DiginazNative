@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   useEffect,
   useMemo,
   useState,
@@ -17,6 +17,7 @@ import {
 
 import {
   ChevronLeft,
+  Check,
   PackageOpen,
 } from "lucide-react-native";
 
@@ -39,7 +40,7 @@ type PublicProfileRow = {
   username: string | null;
   bio: string | null;
   avatar_url: string | null;
-  is_private: boolean;
+  is_verified: boolean;  is_private: boolean;
   show_liked_products: boolean;
   follower_count: number;
   following_count: number;
@@ -167,7 +168,7 @@ export default function PublicProfileScreen({
       } =
         await supabase
           .rpc(
-            "get_public_profile",
+            "get_public_profile_v2",
             {
               target_user_id:
                 profileUserId,
@@ -429,13 +430,33 @@ export default function PublicProfileScreen({
               {profile.full_name}
             </Text>
 
-            <Text
-              style={styles.username}
+            <View
+              style={
+                styles.usernameRow
+              }
             >
-              {profile.username
-                ? `@${profile.username}`
-                : "@diginaz"}
-            </Text>
+              <Text
+                style={styles.username}
+              >
+                {profile.username
+                  ? `@${profile.username}`
+                  : "@diginaz"}
+              </Text>
+
+              {profile.is_verified ? (
+                <View
+                  style={
+                    styles.verifiedBadge
+                  }
+                >
+                  <Check
+                    size={7}
+                    color="#FFFFFF"
+                    strokeWidth={3.2}
+                  />
+                </View>
+              ) : null}
+            </View>
 
 
             <View
@@ -832,6 +853,22 @@ const styles =
       color: "#0F172A",
       fontFamily:
         "PlusJakartaSans_700Bold",
+    },    usernameRow: {
+      marginTop: 2,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    verifiedBadge: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      marginLeft: 3,
+      backgroundColor: "#2563EB",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
     },
 
     username: {

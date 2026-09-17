@@ -1,3 +1,6 @@
+import { Image } from "react-native";
+import ReactNativeBlobUtil from "react-native-blob-util";
+
 import { supabase } from "./supabase";
 import { logA4 } from "./storeProductPreview";
 
@@ -9,6 +12,7 @@ export type StoreFirstPage = {
 export type StoreProductCardItem = {
   id: string;
   creatorUserId: string;
+  creatorAvatarUrl?: string | null;
   type: string;
   subject: string;
   level: string;
@@ -54,6 +58,212 @@ type StoreReviewRow = {
   product_key: string;
   rating: number;
 };
+
+
+type StoreCreatorAvatarRow = {
+  auth_user_id: string;
+  avatar_url: string | null;
+};
+
+
+async function fetchStoreCreatorAvatarMap(
+  creatorUserIds: string[]
+): Promise<
+  Map<string, string | null>
+> {
+
+  const uniqueIds =
+    Array.from(
+      new Set(
+        creatorUserIds.filter(
+          Boolean
+        )
+      )
+    );
+
+
+  if (
+    uniqueIds.length === 0
+  ) {
+    return new Map();
+  }
+
+
+  const {
+    data,
+    error,
+  } =
+    await supabase
+      .rpc(
+        "get_store_creator_avatars",
+        {
+          target_user_ids:
+            uniqueIds,
+        }
+      );
+
+
+  if (error) {
+    console.warn(
+      "Avatar creator Store gagal dimuat:",
+      error
+    );
+
+    return new Map();
+  }
+
+
+  const rows =
+    (data ?? []) as unknown as
+      StoreCreatorAvatarRow[];
+
+
+  return new Map(
+    rows.map(
+      row => [
+        row.auth_user_id,
+        String(
+          row.avatar_url ?? ""
+        ).trim() || null,
+      ] as const
+    )
+  );
+}
+
+/*
+ * CREATOR_AVATAR_LOCAL_FILE_V8
+ *
+ * Product Detail harus menerima file lokal,
+ * bukan URL network.
+ */
+async function cacheCreatorAvatarLocally(
+  creatorUserId: string,
+  avatarUrl: string | null
+): Promise<string | null> {
+
+  if (!avatarUrl) {
+    return null;
+  }
+
+
+  try {
+    const rawName =
+      avatarUrl
+        .split("/")
+        .pop()
+        ?.split("?")[0] ??
+      "avatar.jpg";
+
+
+    const safeName =
+      rawName.replace(
+        /[^a-zA-Z0-9._-]/g,
+        "_"
+      );
+
+
+    const safeUserId =
+      creatorUserId.replace(
+        /[^a-zA-Z0-9_-]/g,
+        "_"
+      );
+
+
+    const localPath =
+      ReactNativeBlobUtil.fs.dirs.CacheDir +
+      "/diginaz-creator-" +
+      safeUserId +
+      "-" +
+      safeName;
+
+
+    const exists =
+      await ReactNativeBlobUtil.fs.exists(
+        localPath
+      );
+
+
+    if (!exists) {
+      await ReactNativeBlobUtil
+        .config({
+          path:
+            localPath,
+          fileCache:
+            true,
+        })
+        .fetch(
+          "GET",
+          avatarUrl
+        );
+    }
+
+
+    return (
+      "file://" +
+      localPath
+    );
+
+  } catch (error) {
+    console.warn(
+      "Avatar creator gagal dicache lokal:",
+      error
+    );
+
+    /*
+     * Fallback:
+     * URL network tetap dapat dipakai.
+     */
+    return avatarUrl;
+  }
+}
+
+
+async function buildCreatorAvatarDisplayMap(
+  remoteMap: Map<
+    string,
+    string | null
+  >
+): Promise<
+  Map<string, string | null>
+> {
+
+  const result =
+    new Map<
+      string,
+      string | null
+    >();
+
+
+  await Promise.all(
+    Array.from(
+      remoteMap.entries()
+    ).map(
+      async (
+        [
+          creatorUserId,
+          avatarUrl,
+        ]
+      ) => {
+
+        const displayUri =
+          await cacheCreatorAvatarLocally(
+            creatorUserId,
+            avatarUrl
+          );
+
+
+        result.set(
+          creatorUserId,
+          displayUri
+        );
+      }
+    )
+  );
+
+
+  return result;
+}
+
 
 export function formatRupiah(
   value: number | null
@@ -122,6 +332,14 @@ export async function fetchPublishedStoreProducts(
       (row) => row.id
     );
 
+  const creatorAvatarMapPromise =
+    fetchStoreCreatorAvatarMap(
+      rows.map(
+        row =>
+          row.creator_user_id
+      )
+    );
+
   const reviewsStarted = Date.now();
   let reviewRows:
     StoreReviewRow[] = [];
@@ -156,6 +374,15 @@ export async function fetchPublishedStoreProducts(
   }
 
   logA4("STORE_REVIEWS_DONE", "store", { ms: Date.now() - reviewsStarted });
+
+  const creatorAvatarMap =
+    await creatorAvatarMapPromise;
+
+
+  const creatorAvatarDisplayMap =
+    await buildCreatorAvatarDisplayMap(
+      creatorAvatarMap
+    );
 
   const ratingMap =
     new Map<
@@ -234,6 +461,11 @@ export async function fetchPublishedStoreProducts(
 
         creatorUserId:
           row.creator_user_id,
+
+        creatorAvatarUrl:
+          creatorAvatarDisplayMap.get(
+            row.creator_user_id
+          ) ?? null,
 
         type:
           row.product_type,
@@ -396,12 +628,35 @@ export async function fetchPublishedStoreProductById(
         .publicUrl || null;
   }
 
+
+
+  const creatorAvatarMap =
+    await fetchStoreCreatorAvatarMap(
+      [
+        row.creator_user_id,
+      ]
+    );
+
+  const creatorAvatarRemoteUrl =
+    creatorAvatarMap.get(
+      row.creator_user_id
+    ) ?? null;
+
+
+  const creatorAvatarUrl =
+    await cacheCreatorAvatarLocally(
+      row.creator_user_id,
+      creatorAvatarRemoteUrl
+    );
+
   return {
     id:
       row.id,
 
     creatorUserId:
       row.creator_user_id,
+
+    creatorAvatarUrl,
 
     type:
       row.product_type,

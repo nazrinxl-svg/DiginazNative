@@ -5,7 +5,7 @@ import type {
 } from "./storeProducts";
 
 const STORE_PRODUCTS_CACHE_KEY =
-  "diginaz:store-products:v2";
+  "diginaz:store-products:v4";
 
 export async function readStoreProductsCache():
   Promise<StoreProductCardItem[] | null> {

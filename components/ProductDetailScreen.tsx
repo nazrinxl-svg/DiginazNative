@@ -34,6 +34,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import ReactNativeBlobUtil from "react-native-blob-util";
 import { supabase } from "../lib/supabase";
+import {
+  getCreatorAvatarUrl,
+  peekCreatorAvatar,
+} from "../lib/creatorAvatarPreview";
 import { pdfViewer } from "../lib/pdfViewer";
 
 import {
@@ -45,6 +49,7 @@ import {
 type ProductSummary = {
   id: string;
   creatorUserId: string;
+  creatorAvatarUrl?: string | null;
   type: string;
   subject: string;
   level: string;
@@ -84,6 +89,7 @@ type ProductPageRow = {
 
 type Props = {
   product: ProductSummary;
+  initialCurrentUserId?: string | null;
   previewSession?: StoreProductPreviewSession;
   onBack: () => void;
   onEditProduct: () => void;
@@ -99,6 +105,7 @@ type Props = {
 
 export default function ProductDetailScreen({
   product,
+  initialCurrentUserId,
   previewSession,
   onBack,
   onEditProduct,
@@ -108,6 +115,39 @@ export default function ProductDetailScreen({
 }: Props) {
   const { width: viewportWidth } =
     useWindowDimensions();
+
+  const [
+    avatarDiagStartedAt,
+  ] = useState(
+    () => Date.now()
+  );
+
+  console.log(
+    "[AVATAR_DIAG][DETAIL_RENDER]",
+    {
+      productId:
+        product.id,
+
+      propAvatar:
+        product.creatorAvatarUrl ??
+        null,
+
+      propIsFile:
+        Boolean(
+          product.creatorAvatarUrl
+            ?.startsWith(
+              "file://"
+            )
+        ),
+
+      sinceStart:
+        Date.now() -
+        avatarDiagStartedAt,
+
+      at:
+        Date.now(),
+    }
+  );
 
   const [localPreviewSession] = useState(createStoreProductPreviewSession);
   const pagePreview = previewSession ?? localPreviewSession;
@@ -203,7 +243,9 @@ export default function ProductDetailScreen({
     useState("");
 
   const [currentUserId, setCurrentUserId] =
-    useState<string | null>(null);
+    useState<string | null>(
+      () => initialCurrentUserId ?? null
+    );
 
   const [contactLoading, setContactLoading] =
     useState(false);
@@ -225,6 +267,11 @@ export default function ProductDetailScreen({
   ] = useState(false);
 
   const [
+    creatorFollowReady,
+    setCreatorFollowReady,
+  ] = useState(false);
+
+  const [
     followLoading,
     setFollowLoading,
   ] = useState(false);
@@ -232,7 +279,38 @@ export default function ProductDetailScreen({
   const [
     creatorAvatarUrl,
     setCreatorAvatarUrl,
-  ] = useState("");
+  ] = useState(
+    () =>
+      product.creatorAvatarUrl ??
+      peekCreatorAvatar(
+        product.creatorUserId
+      ) ??
+      ""
+  );
+
+  console.log(
+    "[AVATAR_DIAG][DETAIL_STATE]",
+    {
+      stateAvatar:
+        creatorAvatarUrl ||
+        null,
+
+      stateIsFile:
+        Boolean(
+          creatorAvatarUrl
+            ?.startsWith(
+              "file://"
+            )
+        ),
+
+      sinceStart:
+        Date.now() -
+        avatarDiagStartedAt,
+
+      at:
+        Date.now(),
+    }
+  );
 
   // DOWNLOAD_SUCCESS_DIGINAZ_MODAL_STATE
   const [
@@ -804,26 +882,125 @@ export default function ProductDetailScreen({
   const isOwner =
     currentUserId === product.creatorUserId;
 
-  // CREATOR_AVATAR_FOR_FOLLOW_UI
+  // CREATOR_PROFILE_BOOTSTRAP_V6
+
+  /*
+   * AVATAR V8
+   *
+   * Prioritas pertama adalah URI yang sudah
+   * dibawa product. Biasanya ini file:// lokal.
+   *
+   * Jangan overwrite dengan URL network jika
+   * avatar sudah tersedia pada frame pertama.
+   */
   useEffect(() => {
     let active = true;
 
-    async function loadCreatorAvatar() {
+    if (
+      product.creatorAvatarUrl
+    ) {
+      setCreatorAvatarUrl(
+        product.creatorAvatarUrl
+      );
+
+      return () => {
+        active = false;
+      };
+    }
+
+
+    const cachedAvatar =
+      peekCreatorAvatar(
+        product.creatorUserId
+      );
+
+
+    if (cachedAvatar) {
+      setCreatorAvatarUrl(
+        cachedAvatar
+      );
+    }
+
+
+    void getCreatorAvatarUrl(
+      product.creatorUserId
+    )
+      .then(avatarUrl => {
+        if (
+          !active ||
+          !avatarUrl
+        ) {
+          return;
+        }
+
+        setCreatorAvatarUrl(
+          avatarUrl
+        );
+      })
+      .catch(error => {
+        console.warn(
+          "Avatar creator gagal dimuat:",
+          error
+        );
+      });
+
+
+    return () => {
+      active = false;
+    };
+  }, [
+    product.creatorUserId,
+    product.creatorAvatarUrl,
+  ]);
+
+
+  /*
+   * FOLLOW:
+   * currentUserId harus sudah siap dulu.
+   *
+   * Ini mencegah akun dianggap
+   * "belum follow" pada frame pertama.
+   */
+  useEffect(() => {
+    let active = true;
+
+    setCreatorFollowReady(
+      false
+    );
+
+    if (!currentUserId) {
+      return () => {
+        active = false;
+      };
+    }
+
+    if (isOwner) {
+      setIsFollowingCreator(
+        false
+      );
+
+      setCreatorFollowReady(
+        true
+      );
+
+      return () => {
+        active = false;
+      };
+    }
+
+    async function loadCreatorFollow() {
       try {
         const {
           data,
           error,
         } =
           await supabase
-            .from(
-              "app_profiles"
-            )
-            .select(
-              "avatar_url"
-            )
-            .eq(
-              "auth_user_id",
-              product.creatorUserId
+            .rpc(
+              "get_public_profile",
+              {
+                target_user_id:
+                  product.creatorUserId,
+              }
             )
             .maybeSingle();
 
@@ -835,96 +1012,37 @@ export default function ProductDetailScreen({
           return;
         }
 
-        const avatar =
-          String(
-            data?.avatar_url ?? ""
-          ).trim();
-
-        setCreatorAvatarUrl(
-          avatar
-        );
-
-        if (avatar) {
-          void Image.prefetch(
-            avatar
-          ).catch(
-            () => undefined
-          );
-        }
-      }
-      catch (error) {
-        console.warn(
-          "Avatar creator gagal dimuat:",
-          error
-        );
-
-        if (active) {
-          setCreatorAvatarUrl("");
-        }
-      }
-    }
-
-    void loadCreatorAvatar();
-
-    return () => {
-      active = false;
-    };
-  }, [
-    product.creatorUserId,
-  ]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadCreatorFollow() {
-      if (
-        !currentUserId ||
-        isOwner
-      ) {
-        if (active) {
-          setIsFollowingCreator(false);
-        }
-
-        return;
-      }
-
-      try {
-        const {
-          data,
-          error,
-        } = await supabase
-          .from(
-            "app_profile_follows"
-          )
-          .select(
-            "following_user_id"
-          )
-          .eq(
-            "follower_user_id",
-            currentUserId
-          )
-          .eq(
-            "following_user_id",
-            product.creatorUserId
-          )
-          .maybeSingle();
-
-        if (error) {
-          throw error;
-        }
-
-        if (!active) {
-          return;
-        }
+        const publicProfile =
+          data as unknown as {
+            is_following:
+              boolean | null;
+          } | null;
 
         setIsFollowingCreator(
-          Boolean(data)
+          Boolean(
+            publicProfile?.is_following
+          )
         );
+
+        setCreatorFollowReady(
+          true
+        );
+
       } catch (error) {
         console.warn(
           "Status follow creator gagal dimuat:",
           error
         );
+
+        if (active) {
+          /*
+           * Jangan tampilkan + kalau
+           * status tidak berhasil dipastikan.
+           */
+          setCreatorFollowReady(
+            false
+          );
+        }
       }
     }
 
@@ -2565,7 +2683,52 @@ export default function ProductDetailScreen({
   /*
    * Cover 1:1 hanya untuk kartu Store.
    * Detail Produk hanya memakai halaman produk.
+   */  /*
+   * PRODUCT_DETAIL_FIRST_PAINT_V10
+   *
+   * Jangan bangun seluruh gallery pada render
+   * pertama. Beri native UI kesempatan commit
+   * header + avatar terlebih dahulu.
    */
+  const [
+    previewMountProductId,
+    setPreviewMountProductId,
+  ] = useState<string | null>(
+    null
+  );
+
+  useEffect(() => {
+    let active = true;
+
+    const frame =
+      requestAnimationFrame(
+        () => {
+          if (!active) {
+            return;
+          }
+
+          setPreviewMountProductId(
+            product.id
+          );
+        }
+      );
+
+    return () => {
+      active = false;
+
+      cancelAnimationFrame(
+        frame
+      );
+    };
+  }, [
+    product.id,
+  ]);
+
+  const previewUiReady =
+    previewMountProductId ===
+    product.id;
+
+
   const isPdfProduct =
     Boolean(
       detail?.file_path
@@ -2575,9 +2738,13 @@ export default function ProductDetailScreen({
     );
 
   const productSlides =
-    isPdfProduct
-      ? pdfPageUrls
-      : productPageUrls;
+    previewUiReady
+      ? (
+          isPdfProduct
+            ? pdfPageUrls
+            : productPageUrls
+        )
+      : [];
 
   const productPageCount =
     isPdfProduct
@@ -2707,6 +2874,61 @@ export default function ProductDetailScreen({
                       styles.creatorAvatarImage
                     }
                     resizeMode="cover"
+                    fadeDuration={0}
+
+                    onLoadStart={() => {
+                      console.log(
+                        "[AVATAR_DIAG][IMAGE_START]",
+                        {
+                          uri:
+                            creatorAvatarUrl,
+
+                          sinceStart:
+                            Date.now() -
+                            avatarDiagStartedAt,
+
+                          at:
+                            Date.now(),
+                        }
+                      );
+                    }}
+
+                    onLoad={() => {
+                      console.log(
+                        "[AVATAR_DIAG][IMAGE_LOADED]",
+                        {
+                          uri:
+                            creatorAvatarUrl,
+
+                          sinceStart:
+                            Date.now() -
+                            avatarDiagStartedAt,
+
+                          at:
+                            Date.now(),
+                        }
+                      );
+                    }}
+
+                    onError={event => {
+                      console.log(
+                        "[AVATAR_DIAG][IMAGE_ERROR]",
+                        {
+                          uri:
+                            creatorAvatarUrl,
+
+                          error:
+                            event.nativeEvent,
+
+                          sinceStart:
+                            Date.now() -
+                            avatarDiagStartedAt,
+
+                          at:
+                            Date.now(),
+                        }
+                      );
+                    }}
                   />
                 ) : (
                   <View
@@ -2732,42 +2954,32 @@ export default function ProductDetailScreen({
                 )}
               </Pressable>
 
-              <Pressable
-                style={[
-                  styles.creatorFollowBadge,
-                  isFollowingCreator &&
-                    styles.creatorFollowBadgeActive,
-                ]}
-                onPress={() =>
-                  void handleCreatorFollowToggle()
-                }
-                disabled={followLoading}
-                hitSlop={7}
-                accessibilityLabel={
-                  isFollowingCreator
-                    ? "Berhenti mengikuti"
-                    : "Ikuti pembuat"
-                }
-              >
-                {followLoading ? (
-                  <ActivityIndicator
-                    size={10}
-                    color="#FFFFFF"
-                  />
-                ) : isFollowingCreator ? (
-                  <Check
-                    size={13}
-                    color="#FFFFFF"
-                    strokeWidth={3}
-                  />
-                ) : (
-                  <Plus
-                    size={14}
-                    color="#FFFFFF"
-                    strokeWidth={3}
-                  />
-                )}
-              </Pressable>
+              {creatorFollowReady && !isFollowingCreator ? (
+                <Pressable
+                  style={
+                    styles.creatorFollowBadge
+                  }
+                  onPress={() =>
+                    void handleCreatorFollowToggle()
+                  }
+                  disabled={followLoading}
+                  hitSlop={7}
+                  accessibilityLabel="Ikuti pembuat"
+                >
+                  {followLoading ? (
+                    <ActivityIndicator
+                      size={10}
+                      color="#FFFFFF"
+                    />
+                  ) : (
+                    <Plus
+                      size={14}
+                      color="#FFFFFF"
+                      strokeWidth={3}
+                    />
+                  )}
+                </Pressable>
+              ) : null}
             </View>
           </View>
         )}
@@ -3487,7 +3699,7 @@ export default function ProductDetailScreen({
                   styles.deleteModalProductTitle
                 }
               >
-                Penyimpanan internal › Download
+                Penyimpanan internal â€º Download
               </Text>
             </View>
 
@@ -3763,8 +3975,6 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 21,
-    borderWidth: 2,
-    borderColor: "#DBEAFE",
     backgroundColor: "#EFF6FF",
     alignItems: "center",
     justifyContent: "center",
@@ -3806,10 +4016,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#2563EB",
     alignItems: "center",
     justifyContent: "center",
-  },
-
-  creatorFollowBadgeActive: {
-    backgroundColor: "#2563EB",
   },
 
   ownerProductActionsHidden: {

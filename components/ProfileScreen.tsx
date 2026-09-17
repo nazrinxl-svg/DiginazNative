@@ -25,7 +25,7 @@ import {
 import {
   ArrowLeft,
   Camera,
-  ChevronRight,
+  Check,
   Grid3X3,
   LogOut,
   MoreVertical,
@@ -33,7 +33,8 @@ import {
   PencilLine,
   Settings,
   Shield,
-  ChevronLeft
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react-native";
 
 import {
@@ -262,7 +263,11 @@ export default function ProfileScreen({
     initialAvatarUrl.trim()
   );
 
-  const [
+  const isVerified = true;
+
+
+
+const [
     showSettingsMenu,
     setShowSettingsMenu,
   ] = useState(false);
@@ -3515,18 +3520,38 @@ await Promise.race([
                   {displayName}
                 </Text>
 
-                <Text
+                <View
                   style={
-                    styles.username
+                    styles.usernameRow
                   }
-                  numberOfLines={1}
                 >
-                  {username
-                    ? `@${username}`
-                    : getUsername(
-                        email
-                      )}
-                </Text>
+                  <Text
+                    style={
+                      styles.username
+                    }
+                    numberOfLines={1}
+                  >
+                    {username
+                      ? `@${username}`
+                      : getUsername(
+                          email
+                        )}
+                  </Text>
+
+                  {isVerified ? (
+                    <View
+                      style={
+                        styles.verifiedBadge
+                      }
+                    >
+                      <Check
+                        size={7}
+                        color="#FFFFFF"
+                        strokeWidth={3.2}
+                      />
+                    </View>
+                  ) : null}
+                </View>
 
 
               </View>
@@ -3962,6 +3987,20 @@ const styles =
       lineHeight: 29,
       fontFamily: "PlusJakartaSans_700Bold",
       color: "#0F172A",
+    },    usernameRow: {
+      flexDirection: "row",
+      alignItems: "center",
+    },
+
+    verifiedBadge: {
+      width: 12,
+      height: 12,
+      borderRadius: 6,
+      marginLeft: 3,
+      backgroundColor: "#2563EB",
+      alignItems: "center",
+      justifyContent: "center",
+      flexShrink: 0,
     },
 
     username: {
