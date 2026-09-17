@@ -75,6 +75,15 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def diginazReleaseStoreFile =
+    new File(
+        System.getProperty("user.home"),
+        ".diginaz/diginaz-release.keystore"
+    )
+
+def diginazReleaseStorePassword =
+    System.getenv("DIGINAZ_RELEASE_STORE_PASSWORD")
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -95,15 +104,21 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+
+        release {
+            storeFile diginazReleaseStoreFile
+            storePassword diginazReleaseStorePassword ?: ""
+            keyAlias "diginaz-release"
+            keyPassword diginazReleaseStorePassword ?: ""
+            storeType "PKCS12"
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
