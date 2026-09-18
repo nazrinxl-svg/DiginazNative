@@ -35,6 +35,12 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import ReactNativeBlobUtil from "react-native-blob-util";
 import { supabase } from "../lib/supabase";
 import {
+  createPrivateStoreMediaSignedUrl,
+  STORE_MEDIA_BUCKETS,
+  STORE_MEDIA_SIGNED_URL_TTL,
+  type StorePrivateMediaBucket,
+} from "../lib/storeMedia";
+import {
   getCreatorAvatarUrl,
   peekCreatorAvatar,
 } from "../lib/creatorAvatarPreview";
@@ -1969,8 +1975,9 @@ export default function ProductDetailScreen({
       let downloadFilePath =
         previewFilePath;
 
-      let downloadBucket =
-        "store-product-files";
+      let downloadBucket:
+        StorePrivateMediaBucket =
+          STORE_MEDIA_BUCKETS.productFiles;
 
       let preferredFileName =
         "";
@@ -1990,7 +1997,7 @@ export default function ProductDetailScreen({
           detail.original_file_path.trim();
 
         downloadBucket =
-          "store-product-originals";
+          STORE_MEDIA_BUCKETS.productOriginals;
 
         preferredFileName =
           detail.original_file_name?.trim() ??
@@ -2427,7 +2434,7 @@ export default function ProductDetailScreen({
             freshOriginalPath;
 
           downloadBucket =
-            "store-product-originals";
+            STORE_MEDIA_BUCKETS.productOriginals;
 
           preferredFileName =
             fresh?.original_file_name?.trim() ??
@@ -2449,24 +2456,14 @@ export default function ProductDetailScreen({
         );
       }
 
-      const {
-        data,
-        error,
-      } =
-        await supabase.storage
-          .from(
-            downloadBucket
-          )
-          .createSignedUrl(
-            downloadFilePath,
-            300
-          );
+      const signedUrl =
+        await createPrivateStoreMediaSignedUrl(
+          downloadBucket,
+          downloadFilePath,
+          STORE_MEDIA_SIGNED_URL_TTL.downloadSeconds
+        );
 
-      if (error) {
-        throw error;
-      }
-
-      if (!data?.signedUrl) {
+      if (!signedUrl) {
         throw new Error(
           "Signed URL tidak tersedia."
         );
@@ -2665,7 +2662,7 @@ export default function ProductDetailScreen({
                 })
                 .fetch(
                   "GET",
-                  data.signedUrl
+                  signedUrl
                 )
                 .progress(
                   {
@@ -2794,7 +2791,7 @@ export default function ProductDetailScreen({
           })
           .fetch(
                   "GET",
-                  data.signedUrl
+                  signedUrl
                 )
                 .progress(
                   {
@@ -2836,7 +2833,7 @@ export default function ProductDetailScreen({
         })
         .fetch(
                   "GET",
-                  data.signedUrl
+                  signedUrl
                 )
                 .progress(
                   {
