@@ -56,6 +56,7 @@ export type StoreProductMediaRole =
 
 export const STORE_MEDIA_SIGNED_URL_TTL = {
   previewSeconds: 3600,
+  pdfViewerSeconds: 300,
   downloadSeconds: 300,
   chatSeconds: 3600,
 } as const;

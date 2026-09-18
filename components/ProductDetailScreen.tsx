@@ -799,23 +799,14 @@ export default function ProductDetailScreen({
               );
           }
 
-          const {
-            data: signed,
-            error: signedError,
-          } = await supabase.storage
-            .from(
-              "store-product-files"
-            )
-            .createSignedUrl(
+          const signedPdfUrl =
+            await createPrivateStoreMediaSignedUrl(
+              STORE_MEDIA_BUCKETS.productFiles,
               storagePath,
-              300
+              STORE_MEDIA_SIGNED_URL_TTL.pdfViewerSeconds
             );
 
-          if (signedError) {
-            throw signedError;
-          }
-
-          if (!signed?.signedUrl) {
+          if (!signedPdfUrl) {
             throw new Error(
               "File PDF belum dapat dibuka."
             );
@@ -828,7 +819,7 @@ export default function ProductDetailScreen({
             })
             .fetch(
               "GET",
-              signed.signedUrl
+              signedPdfUrl
             );
         }
 
