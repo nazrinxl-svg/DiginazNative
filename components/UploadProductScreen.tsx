@@ -1499,8 +1499,12 @@ export default function UploadProductScreen({
       );
 
     const pdfPath =
-      `${userId}/${productId}/` +
-      `file-${batchId}-${cleanPreviewName}`;
+      buildStoreProductFilePath(
+        userId,
+        productId,
+        cleanPreviewName,
+        batchId
+      );
 
 
     const originalMimeType =
