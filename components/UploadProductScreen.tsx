@@ -32,6 +32,8 @@ import {
   buildStoreProductOriginalPath,
   buildStoreProductPagePath,
   buildStoreThumbnailPath,
+  registerStoreProductMediaAsset,
+  rollbackStoreProductMediaAssets,
 } from "../lib/storeMedia";
 
 type Props = {
@@ -1764,6 +1766,9 @@ export default function UploadProductScreen({
     let thumbnailPath: string | null = null;
     let filePath: string | null = null;
 
+    const createdMediaAssetIds:
+      string[] = [];
+
     let originalFilePath:
       string | null = null;
 
@@ -2385,6 +2390,41 @@ export default function UploadProductScreen({
           throw thumbnailError;
         }
 
+        const thumbnailMediaAssetId =
+          await registerStoreProductMediaAsset({
+            ownerUserId:
+              user.id,
+            productId:
+              created.id,
+            bucket:
+              STORE_MEDIA_BUCKETS.thumbnails,
+            storagePath:
+              thumbnailPath,
+            mediaKind:
+              "image",
+            variant:
+              "thumbnail",
+            mimeType:
+              thumbnail.mimeType ??
+              "image/jpeg",
+            sizeBytes:
+              thumbnailBuffer.byteLength,
+            visibility:
+              "public_preview",
+            role:
+              "thumbnail",
+            sortOrder:
+              0,
+            metadata: {
+              source:
+                "product_upload",
+            },
+          });
+
+        createdMediaAssetIds.push(
+          thumbnailMediaAssetId
+        );
+
         updateUploadProgress(20);
       }
 
@@ -2547,6 +2587,25 @@ export default function UploadProductScreen({
           .remove([
             originalFilePath,
           ]);
+      }
+
+      if (
+        productId &&
+        createdMediaAssetIds.length > 0
+      ) {
+        try {
+          await rollbackStoreProductMediaAssets(
+            productId,
+            createdMediaAssetIds
+          );
+        } catch (
+          mediaRollbackError
+        ) {
+          console.warn(
+            "Rollback metadata media gagal:",
+            mediaRollbackError
+          );
+        }
       }
 
       if (productId) {
