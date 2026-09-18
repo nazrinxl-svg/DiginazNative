@@ -577,7 +577,8 @@ export default function UploadProductScreen({
     userId: string,
     productId: string,
     firstStoragePath: string,
-    pages: PickedAsset[]
+    pages: PickedAsset[],
+    createdMediaAssetIds: string[]
   ) {
     if (
       pages.length === 0
@@ -714,6 +715,41 @@ export default function UploadProductScreen({
 
         uploadedExtras.push(
           storagePath
+        );
+
+        const pageMediaAssetId =
+          await registerStoreProductMediaAsset({
+            ownerUserId:
+              userId,
+            productId,
+            bucket:
+              STORE_MEDIA_BUCKETS.productFiles,
+            storagePath,
+            mediaKind:
+              "image",
+            variant:
+              "page",
+            mimeType:
+              page.mimeType ??
+              "image/jpeg",
+            sizeBytes:
+              buffer.byteLength,
+            visibility:
+              "private",
+            role:
+              "page",
+            sortOrder:
+              index + 1,
+            metadata: {
+              source:
+                "product_upload",
+              page_number:
+                index + 1,
+            },
+          });
+
+        createdMediaAssetIds.push(
+          pageMediaAssetId
         );
 
         updateUploadProgress(
@@ -2566,7 +2602,8 @@ export default function UploadProductScreen({
           user.id,
           created.id,
           filePath,
-          productPages
+          productPages,
+          createdMediaAssetIds
         );
 
         updateUploadProgress(85);
