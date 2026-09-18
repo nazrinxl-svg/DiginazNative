@@ -36,6 +36,7 @@ import {
   registerStoreProductMediaAsset,
   rollbackStagedStoreProductMediaChange,
   rollbackStoreProductMediaAssets,
+  stageStoreProductMediaRemoval,
   stageStoreProductMediaReplacement,
   type StagedStoreProductMediaChange,
 } from "../lib/storeMedia";
@@ -2009,6 +2010,76 @@ export default function UploadProductScreen({
 
             nextOriginalMimeType =
               originalMimeType;
+
+            const stagedOriginalChange =
+              await stageStoreProductMediaReplacement({
+                ownerUserId:
+                  user.id,
+                productId:
+                  editProductId,
+                bucket:
+                  STORE_MEDIA_BUCKETS.productOriginals,
+                storagePath:
+                  converted.originalPath,
+                mediaKind:
+                  "attachment",
+                variant:
+                  "original",
+                mimeType:
+                  converted.originalMimeType,
+                sizeBytes:
+                  converted.originalSizeBytes,
+                visibility:
+                  "private",
+                role:
+                  "original",
+                sortOrder:
+                  0,
+                metadata: {
+                  source:
+                    "product_edit",
+                  original_file_name:
+                    converted.originalFileName,
+                },
+              });
+
+            stagedMediaChanges.push(
+              stagedOriginalChange
+            );
+
+            const stagedPreviewChange =
+              await stageStoreProductMediaReplacement({
+                ownerUserId:
+                  user.id,
+                productId:
+                  editProductId,
+                bucket:
+                  STORE_MEDIA_BUCKETS.productFiles,
+                storagePath:
+                  converted.pdfPath,
+                mediaKind:
+                  "pdf",
+                variant:
+                  "preview",
+                mimeType:
+                  "application/pdf",
+                sizeBytes:
+                  converted.previewSizeBytes,
+                visibility:
+                  "private",
+                role:
+                  "preview",
+                sortOrder:
+                  0,
+                metadata: {
+                  source:
+                    "product_edit",
+                },
+              });
+
+            stagedMediaChanges.push(
+              stagedPreviewChange
+            );
           } else {
             nextOriginalFilePath =
               null;
@@ -2065,7 +2136,119 @@ export default function UploadProductScreen({
               throw fileError;
             }
 
+            const stagedPdfChange =
+              await stageStoreProductMediaReplacement({
+                ownerUserId:
+                  user.id,
+                productId:
+                  editProductId,
+                bucket:
+                  STORE_MEDIA_BUCKETS.productFiles,
+                storagePath:
+                  filePath,
+                mediaKind:
+                  "pdf",
+                variant:
+                  "original",
+                mimeType:
+                  productFile.mimeType ??
+                  "application/octet-stream",
+                sizeBytes:
+                  fileBuffer.byteLength,
+                visibility:
+                  "private",
+                role:
+                  "original",
+                sortOrder:
+                  0,
+                metadata: {
+                  source:
+                    "product_edit",
+                },
+              });
+
+            stagedMediaChanges.push(
+              stagedPdfChange
+            );
+
+            const stagedPreviewRemoval =
+              await stageStoreProductMediaRemoval(
+                editProductId,
+                "preview",
+                0
+              );
+
+            if (stagedPreviewRemoval) {
+              stagedMediaChanges.push(
+                stagedPreviewRemoval
+              );
+            }
+
         updateUploadProgress(80);
+          }
+
+          const {
+            data: previousPageMediaLinks,
+            error: previousPageMediaLinksError,
+          } = await supabase
+            .from("store_product_media")
+            .select("sort_order")
+            .eq(
+              "product_id",
+              editProductId
+            )
+            .eq(
+              "role",
+              "page"
+            );
+
+          if (previousPageMediaLinksError) {
+            throw previousPageMediaLinksError;
+          }
+
+          const previousPageSortOrders =
+            [
+              ...new Set(
+                (
+                  previousPageMediaLinks ??
+                  []
+                )
+                  .map(row =>
+                    Number(
+                      row.sort_order
+                    )
+                  )
+                  .filter(
+                    value =>
+                      Number.isFinite(
+                        value
+                      ) &&
+                      value >= 0
+                  )
+                  .map(value =>
+                    Math.trunc(
+                      value
+                    )
+                  )
+              ),
+            ];
+
+          for (
+            const pageSortOrder of
+            previousPageSortOrders
+          ) {
+            const stagedPageRemoval =
+              await stageStoreProductMediaRemoval(
+                editProductId,
+                "page",
+                pageSortOrder
+              );
+
+            if (stagedPageRemoval) {
+              stagedMediaChanges.push(
+                stagedPageRemoval
+              );
+            }
           }
 
           nextFilePath =
