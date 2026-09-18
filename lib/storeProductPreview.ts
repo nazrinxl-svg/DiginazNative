@@ -1,5 +1,9 @@
 import { Image } from "react-native";
-import { supabase } from "./supabase";
+import {
+  createPrivateStoreMediaSignedUrl,
+  STORE_MEDIA_BUCKETS,
+  STORE_MEDIA_SIGNED_URL_TTL,
+} from "./storeMedia";
 
 export function logA4(
   event: string,
@@ -27,7 +31,8 @@ type PageUrlEntry = {
  */
 export function createStoreProductPreviewSession() {
   const entries = new Map<string, PageUrlEntry>();
-  const lifetimeSeconds = 3600;
+  const lifetimeSeconds =
+    STORE_MEDIA_SIGNED_URL_TTL.previewSeconds;
 
   function key(productId: string, path: string) {
     return JSON.stringify([productId, path]);
@@ -65,16 +70,21 @@ export function createStoreProductPreviewSession() {
       const started = Date.now();
       logA4("SIGN_START", productId, { page: pageNumber });
       try {
-        const { data, error } = await supabase.storage
-          .from("store-product-files")
-          .createSignedUrl(path, lifetimeSeconds);
-        if (error || !data?.signedUrl) {
+        const signedUrl =
+          await createPrivateStoreMediaSignedUrl(
+            STORE_MEDIA_BUCKETS.productFiles,
+            path,
+            lifetimeSeconds
+          );
+
+        if (!signedUrl) {
           logA4("SIGN_ERROR", productId, {
             page: pageNumber, ms: Date.now() - started,
           });
           return null;
         }
-        entry.url = data.signedUrl;
+
+        entry.url = signedUrl;
         // Start at request time and leave a minute for clock/network margin.
         entry.expiresAt = started + (lifetimeSeconds - 60) * 1000;
         logA4("URL_READY", productId, {
