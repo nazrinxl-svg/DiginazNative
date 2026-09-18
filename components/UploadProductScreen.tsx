@@ -1476,6 +1476,8 @@ export default function UploadProductScreen({
     originalPath: string;
     originalFileName: string;
     originalMimeType: string;
+    originalSizeBytes: number;
+    previewSizeBytes: number;
   }> {
     const wordExtension =
       getExtension(
@@ -1656,6 +1658,10 @@ export default function UploadProductScreen({
         originalPath,
         originalFileName,
         originalMimeType,
+        originalSizeBytes:
+          wordBuffer.byteLength,
+        previewSizeBytes:
+          previewBuffer.byteLength,
       };
     }
     catch (error) {
@@ -2493,6 +2499,74 @@ export default function UploadProductScreen({
 
         originalMimeType =
           converted.originalMimeType;
+
+        const originalMediaAssetId =
+          await registerStoreProductMediaAsset({
+            ownerUserId:
+              user.id,
+            productId:
+              created.id,
+            bucket:
+              STORE_MEDIA_BUCKETS.productOriginals,
+            storagePath:
+              converted.originalPath,
+            mediaKind:
+              "attachment",
+            variant:
+              "original",
+            mimeType:
+              converted.originalMimeType,
+            sizeBytes:
+              converted.originalSizeBytes,
+            visibility:
+              "private",
+            role:
+              "original",
+            sortOrder:
+              0,
+            metadata: {
+              source:
+                "product_upload",
+            },
+          });
+
+        createdMediaAssetIds.push(
+          originalMediaAssetId
+        );
+
+        const previewMediaAssetId =
+          await registerStoreProductMediaAsset({
+            ownerUserId:
+              user.id,
+            productId:
+              created.id,
+            bucket:
+              STORE_MEDIA_BUCKETS.productFiles,
+            storagePath:
+              converted.pdfPath,
+            mediaKind:
+              "pdf",
+            variant:
+              "preview",
+            mimeType:
+              "application/pdf",
+            sizeBytes:
+              converted.previewSizeBytes,
+            visibility:
+              "private",
+            role:
+              "preview",
+            sortOrder:
+              0,
+            metadata: {
+              source:
+                "product_upload",
+            },
+          });
+
+        createdMediaAssetIds.push(
+          previewMediaAssetId
+        );
       } else {
         const rawFileName =
           productFile.fileName ??
