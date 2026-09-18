@@ -578,7 +578,7 @@ function ProductCard({
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 4,
+                  gap: 3,
                 },
               ]}
               onPress={event => {
@@ -609,7 +609,8 @@ function ProductCard({
                 style={{
                   marginTop: 0,
                   fontSize: 8,
-                  lineHeight: 10,
+                  lineHeight: 16,
+                  includeFontPadding: false,
                   fontWeight: "500",
                   color: "#94A3B8",
                 }}
@@ -627,6 +628,10 @@ function ProductCard({
                 {
                   flex: 1,
                   paddingVertical: 2,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 3,
                 },
               ]}
               onPress={event => {
@@ -661,7 +666,8 @@ function ProductCard({
                 style={{
                   marginTop: 0,
                   fontSize: 8,
-                  lineHeight: 10,
+                  lineHeight: 16,
+                  includeFontPadding: false,
                   fontWeight: "500",
                   color: "#94A3B8",
                 }}
@@ -676,7 +682,7 @@ function ProductCard({
 
 
             <Pressable
-              style={[styles.cardIconButton, { flex: 1, paddingVertical: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4 }]}
+              style={[styles.cardIconButton, { flex: 1, paddingVertical: 2, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 3 }]}
               onPress={event => {
                 event.stopPropagation();
                 onOpenComments();
@@ -693,7 +699,8 @@ function ProductCard({
                 style={{
                   marginTop: 0,
                   fontSize: 8,
-                  lineHeight: 10,
+                  lineHeight: 16,
+                  includeFontPadding: false,
                   fontWeight: "500",
                   color: "#94A3B8",
                 }}
@@ -713,7 +720,7 @@ function ProductCard({
                   flexDirection: "row",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 4,
+                  gap: 3,
                 },
               ]}
               onPress={event => {
@@ -732,7 +739,8 @@ function ProductCard({
                 style={{
                   marginTop: 0,
                   fontSize: 8,
-                  lineHeight: 10,
+                  lineHeight: 16,
+                  includeFontPadding: false,
                   fontWeight: "500",
                   color: "#94A3B8",
                 }}
