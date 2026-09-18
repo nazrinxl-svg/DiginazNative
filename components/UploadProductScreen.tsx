@@ -26,6 +26,9 @@ import { ImagePickerCompat as ImagePicker } from "../lib/nativePickers";
 import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 
 import { supabase } from "../lib/supabase";
+import {
+  buildStoreThumbnailPath,
+} from "../lib/storeMedia";
 
 type Props = {
   onClose: () => void;
@@ -1823,8 +1826,11 @@ export default function UploadProductScreen({
             );
 
           thumbnailPath =
-            `${user.id}/${editProductId}/` +
-            `thumbnail-${Date.now()}.${extension}`;
+            buildStoreThumbnailPath(
+              user.id,
+              editProductId,
+              extension
+            );
 
           const thumbnailBuffer =
             await fetch(thumbnail.uri)
@@ -2333,8 +2339,11 @@ export default function UploadProductScreen({
           );
 
         thumbnailPath =
-          `${user.id}/${productId}/` +
-          `thumbnail-${Date.now()}.${extension}`;
+          buildStoreThumbnailPath(
+            user.id,
+            created.id,
+            extension
+          );
 
         const thumbnailBuffer =
           await fetch(thumbnail.uri)
