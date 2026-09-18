@@ -2,6 +2,10 @@ import { Image } from "react-native";
 import ReactNativeBlobUtil from "react-native-blob-util";
 
 import { supabase } from "./supabase";
+import {
+  getPublicStoreMediaUrl,
+  STORE_MEDIA_BUCKETS,
+} from "./storeMedia";
 import { logA4 } from "./storeProductPreview";
 
 export type StoreFirstPage = {
@@ -435,25 +439,13 @@ export async function fetchPublishedStoreProducts(
           ?.storage_path ??
         null;
 
-      let thumbnailUrl:
-        string | null = null;
-
-      if (
+      const thumbnailUrl =
         row.thumbnail_path
-      ) {
-
-        const { data } =
-          supabase.storage
-            .from(
-              "store-thumbnails"
-            )
-            .getPublicUrl(
+          ? getPublicStoreMediaUrl(
+              STORE_MEDIA_BUCKETS.thumbnails,
               row.thumbnail_path
-            );
-
-        thumbnailUrl =
-          data.publicUrl || null;
-      }
+            )
+          : null;
 
       return {
         id:
@@ -605,28 +597,13 @@ export async function fetchPublishedStoreProductById(
       ?.storage_path ??
     null;
 
-  let thumbnailUrl:
-    string | null = null;
-
-  if (
+  const thumbnailUrl =
     row.thumbnail_path
-  ) {
-
-    const {
-      data: thumbnailData,
-    } =
-      supabase.storage
-        .from(
-          "store-thumbnails"
-        )
-        .getPublicUrl(
+      ? getPublicStoreMediaUrl(
+          STORE_MEDIA_BUCKETS.thumbnails,
           row.thumbnail_path
-        );
-
-    thumbnailUrl =
-      thumbnailData
-        .publicUrl || null;
-  }
+        )
+      : null;
 
 
 
