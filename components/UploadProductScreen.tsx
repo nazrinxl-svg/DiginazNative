@@ -27,6 +27,7 @@ import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 
 import { supabase } from "../lib/supabase";
 import {
+  buildStoreProductFilePath,
   buildStoreThumbnailPath,
 } from "../lib/storeMedia";
 
@@ -1924,8 +1925,11 @@ export default function UploadProductScreen({
               );
 
             filePath =
-              `${user.id}/${editProductId}/` +
-              `file-${Date.now()}-${cleanFileName}`;
+              buildStoreProductFilePath(
+                user.id,
+                editProductId,
+                cleanFileName
+              );
 
             const fileBuffer =
               await fetch(
@@ -2413,8 +2417,11 @@ export default function UploadProductScreen({
           );
 
         filePath =
-          `${user.id}/${productId}/` +
-          `file-${Date.now()}-${cleanFileName}`;
+          buildStoreProductFilePath(
+            user.id,
+            created.id,
+            cleanFileName
+          );
 
         const fileBuffer =
           await fetch(
