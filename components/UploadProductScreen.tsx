@@ -32,8 +32,12 @@ import {
   buildStoreProductOriginalPath,
   buildStoreProductPagePath,
   buildStoreThumbnailPath,
+  finalizeStagedStoreProductMediaChange,
   registerStoreProductMediaAsset,
+  rollbackStagedStoreProductMediaChange,
   rollbackStoreProductMediaAssets,
+  stageStoreProductMediaReplacement,
+  type StagedStoreProductMediaChange,
 } from "../lib/storeMedia";
 
 type Props = {
@@ -1811,6 +1815,12 @@ export default function UploadProductScreen({
     const createdMediaAssetIds:
       string[] = [];
 
+    const stagedMediaChanges:
+      StagedStoreProductMediaChange[] = [];
+
+    let editMediaChangesCommitted =
+      false;
+
     let originalFilePath:
       string | null = null;
 
@@ -1917,6 +1927,41 @@ export default function UploadProductScreen({
           }
 
         updateUploadProgress(20);
+
+          const stagedThumbnailChange =
+            await stageStoreProductMediaReplacement({
+              ownerUserId:
+                user.id,
+              productId:
+                editProductId,
+              bucket:
+                STORE_MEDIA_BUCKETS.thumbnails,
+              storagePath:
+                thumbnailPath,
+              mediaKind:
+                "image",
+              variant:
+                "thumbnail",
+              mimeType:
+                thumbnail.mimeType ??
+                "image/jpeg",
+              sizeBytes:
+                thumbnailBuffer.byteLength,
+              visibility:
+                "public_preview",
+              role:
+                "thumbnail",
+              sortOrder:
+                0,
+              metadata: {
+                source:
+                  "product_edit",
+              },
+            });
+
+          stagedMediaChanges.push(
+            stagedThumbnailChange
+          );
 
           nextThumbnailPath =
             thumbnailPath;
@@ -2114,6 +2159,27 @@ export default function UploadProductScreen({
           throw new Error(
             "Produk tidak berhasil diperbarui."
           );
+        }
+
+        editMediaChangesCommitted =
+          true;
+
+        for (
+          const stagedChange of
+          stagedMediaChanges
+        ) {
+          try {
+            await finalizeStagedStoreProductMediaChange(
+              stagedChange
+            );
+          } catch (
+            finalizeMediaError
+          ) {
+            console.warn(
+              "Finalisasi metadata media lama belum selesai:",
+              finalizeMediaError
+            );
+          }
         }
 
         /*
@@ -2721,19 +2787,56 @@ export default function UploadProductScreen({
         error
       );
 
-      if (thumbnailPath) {
+      if (
+        editProductId &&
+        !editMediaChangesCommitted &&
+        stagedMediaChanges.length > 0
+      ) {
+        for (
+          const stagedChange of
+          [...stagedMediaChanges].reverse()
+        ) {
+          try {
+            await rollbackStagedStoreProductMediaChange(
+              stagedChange
+            );
+          } catch (
+            stagedRollbackError
+          ) {
+            console.warn(
+              "Rollback edit metadata media gagal:",
+              stagedRollbackError
+            );
+          }
+        }
+      }
+
+      const shouldCleanupUploadedStorage =
+        !editProductId ||
+        !editMediaChangesCommitted;
+
+      if (
+        shouldCleanupUploadedStorage &&
+        thumbnailPath
+      ) {
         await supabase.storage
           .from("store-thumbnails")
           .remove([thumbnailPath]);
       }
 
-      if (filePath) {
+      if (
+        shouldCleanupUploadedStorage &&
+        filePath
+      ) {
         await supabase.storage
           .from("store-product-files")
           .remove([filePath]);
       }
 
-      if (originalFilePath) {
+      if (
+        shouldCleanupUploadedStorage &&
+        originalFilePath
+      ) {
         await supabase.storage
           .from(
             "store-product-originals"
