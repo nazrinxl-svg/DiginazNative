@@ -2505,6 +2505,49 @@ export default function UploadProductScreen({
           throw fileError;
         }
 
+        const primaryMediaAssetId =
+          await registerStoreProductMediaAsset({
+            ownerUserId:
+              user.id,
+            productId:
+              created.id,
+            bucket:
+              STORE_MEDIA_BUCKETS.productFiles,
+            storagePath:
+              filePath,
+            mediaKind:
+              productFileKind === "image"
+                ? "image"
+                : "pdf",
+            variant:
+              productFileKind === "image"
+                ? "page"
+                : "original",
+            mimeType:
+              productFile.mimeType ??
+              "application/octet-stream",
+            sizeBytes:
+              fileBuffer.byteLength,
+            visibility:
+              "private",
+            role:
+              productFileKind === "image"
+                ? "page"
+                : "original",
+            sortOrder:
+              productFileKind === "image"
+                ? 1
+                : 0,
+            metadata: {
+              source:
+                "product_upload",
+            },
+          });
+
+        createdMediaAssetIds.push(
+          primaryMediaAssetId
+        );
+
         updateUploadProgress(
           productFileKind === "image"
             ? 40
