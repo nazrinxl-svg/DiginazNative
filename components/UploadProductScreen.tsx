@@ -27,6 +27,7 @@ import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 
 import { supabase } from "../lib/supabase";
 import {
+  STORE_MEDIA_BUCKETS,
   buildStoreProductFilePath,
   buildStoreProductOriginalPath,
   buildStoreProductPagePath,
@@ -690,7 +691,7 @@ export default function UploadProductScreen({
         } =
           await supabase.storage
             .from(
-              "store-product-files"
+              STORE_MEDIA_BUCKETS.productFiles
             )
             .upload(
               storagePath,
@@ -965,7 +966,7 @@ export default function UploadProductScreen({
           } =
             await supabase.storage
               .from(
-                "store-product-files"
+                STORE_MEDIA_BUCKETS.productFiles
               )
               .upload(
                 storagePath,
@@ -1557,7 +1558,7 @@ export default function UploadProductScreen({
       } =
         await supabase.storage
           .from(
-            "store-product-originals"
+            STORE_MEDIA_BUCKETS.productOriginals
           )
           .upload(
             originalPath,
@@ -1589,7 +1590,7 @@ export default function UploadProductScreen({
       } =
         await supabase.storage
           .from(
-            "store-product-files"
+            STORE_MEDIA_BUCKETS.productFiles
           )
           .upload(
             pdfPath,
@@ -1852,7 +1853,7 @@ export default function UploadProductScreen({
           const {
             error: thumbnailError,
           } = await supabase.storage
-            .from("store-thumbnails")
+            .from(STORE_MEDIA_BUCKETS.thumbnails)
             .upload(
               thumbnailPath,
               thumbnailBuffer,
@@ -1954,7 +1955,7 @@ export default function UploadProductScreen({
             } =
               await supabase.storage
                 .from(
-                  "store-product-files"
+                  STORE_MEDIA_BUCKETS.productFiles
                 )
                 .upload(
                   filePath,
@@ -2368,7 +2369,7 @@ export default function UploadProductScreen({
         const {
           error: thumbnailError,
         } = await supabase.storage
-          .from("store-thumbnails")
+          .from(STORE_MEDIA_BUCKETS.thumbnails)
           .upload(
             thumbnailPath,
             thumbnailBuffer,
@@ -2446,7 +2447,7 @@ export default function UploadProductScreen({
         } =
           await supabase.storage
             .from(
-              "store-product-files"
+              STORE_MEDIA_BUCKETS.productFiles
             )
             .upload(
               filePath,
@@ -4113,4 +4114,3 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
 });
-
