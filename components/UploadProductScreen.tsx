@@ -173,6 +173,35 @@ export default function UploadProductScreen({
   const [submitting, setSubmitting] =
     useState(false);
 
+  // UPLOAD_PROGRESS_V1
+  const [
+    uploadProgress,
+    setUploadProgress,
+  ] = useState<number | null>(null);
+
+  function updateUploadProgress(
+    value: number
+  ) {
+    const nextValue =
+      Math.max(
+        0,
+        Math.min(
+          100,
+          Math.round(value)
+        )
+      );
+
+    setUploadProgress(
+      current =>
+        current === null
+          ? nextValue
+          : Math.max(
+              current,
+              nextValue
+            )
+    );
+  }
+
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] =
     useState("");
@@ -663,6 +692,18 @@ export default function UploadProductScreen({
           storagePath
         );
 
+        updateUploadProgress(
+          40 +
+            (
+              index /
+              Math.max(
+                1,
+                pages.length - 1
+              )
+            ) *
+              45
+        );
+
         currentPaths.push(
           storagePath
         );
@@ -924,6 +965,18 @@ export default function UploadProductScreen({
 
           uploadedPaths.push(
             storagePath
+          );
+
+          updateUploadProgress(
+            20 +
+              (
+                (index + 1) /
+                Math.max(
+                  1,
+                  pages.length
+                )
+              ) *
+                65
           );
         }
 
@@ -1498,6 +1551,8 @@ export default function UploadProductScreen({
       originalUploaded =
         true;
 
+      updateUploadProgress(45);
+
 
       const {
         error:
@@ -1524,6 +1579,8 @@ export default function UploadProductScreen({
       ) {
         throw previewUploadError;
       }
+
+      updateUploadProgress(80);
 
 
       return {
@@ -1671,6 +1728,7 @@ export default function UploadProductScreen({
     }
 
     setSubmitting(true);
+    setUploadProgress(0);
 
     let productId: string | null = null;
     let thumbnailPath: string | null = null;
@@ -1703,6 +1761,8 @@ export default function UploadProductScreen({
         );
       }
 
+      updateUploadProgress(5);
+
       if (editProductId) {
         const {
           data: existing,
@@ -1719,6 +1779,8 @@ export default function UploadProductScreen({
         if (existingError) {
           throw existingError;
         }
+
+        updateUploadProgress(10);
 
         let nextThumbnailPath =
           existing.thumbnail_path ?? null;
@@ -1773,6 +1835,8 @@ export default function UploadProductScreen({
           if (thumbnailError) {
             throw thumbnailError;
           }
+
+        updateUploadProgress(20);
 
           nextThumbnailPath =
             thumbnailPath;
@@ -1872,6 +1936,8 @@ export default function UploadProductScreen({
             if (fileError) {
               throw fileError;
             }
+
+        updateUploadProgress(80);
           }
 
           nextFilePath =
@@ -1904,6 +1970,8 @@ export default function UploadProductScreen({
               existing.id,
               productPages
             );
+
+          updateUploadProgress(85);
 
           nextOriginalFilePath =
             null;
@@ -2068,6 +2136,8 @@ export default function UploadProductScreen({
           }
         }
 
+        updateUploadProgress(100);
+
         setMessage(
           "Perubahan produk berhasil disimpan."
         );
@@ -2125,6 +2195,8 @@ export default function UploadProductScreen({
 
       productId = created.id;
 
+      updateUploadProgress(10);
+
       if (thumbnail) {
         const extension =
           getExtension(
@@ -2160,6 +2232,8 @@ export default function UploadProductScreen({
         if (thumbnailError) {
           throw thumbnailError;
         }
+
+        updateUploadProgress(20);
       }
 
       if (
@@ -2235,6 +2309,12 @@ export default function UploadProductScreen({
         if (fileError) {
           throw fileError;
         }
+
+        updateUploadProgress(
+          productFileKind === "image"
+            ? 40
+            : 80
+        );
       }
 
       if (
@@ -2250,6 +2330,8 @@ export default function UploadProductScreen({
           filePath,
           productPages
         );
+
+        updateUploadProgress(85);
       }
 
 
@@ -2274,6 +2356,8 @@ export default function UploadProductScreen({
       if (publishError) {
         throw publishError;
       }
+
+      updateUploadProgress(100);
 
       setMessage(
         "Produk berhasil dipublikasikan."
@@ -2326,6 +2410,7 @@ export default function UploadProductScreen({
       );
     } finally {
       setSubmitting(false);
+      setUploadProgress(null);
     }
   }
 
@@ -3395,10 +3480,18 @@ export default function UploadProductScreen({
             ]}
           >
             {submitting ? (
-              <ActivityIndicator
-                size="small"
-                color="#FFFFFF"
-              />
+              <>
+                <ActivityIndicator
+                  size="small"
+                  color="#FFFFFF"
+                />
+
+                <Text
+                  style={styles.submitText}
+                >
+                  {`${uploadProgress ?? 0}%`}
+                </Text>
+              </>
             ) : (
               <>
                 <Upload

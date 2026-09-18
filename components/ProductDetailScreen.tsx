@@ -431,6 +431,71 @@ export default function ProductDetailScreen({
     setProductAccessLoading,
   ] = useState(false);
 
+  // DOWNLOAD_PROGRESS_V1
+  const [
+    downloadProgress,
+    setDownloadProgress,
+  ] = useState<number | null>(null);
+
+  function reportDownloadProgress(
+    received: string | number,
+    total: string | number,
+    unitIndex = 0,
+    unitCount = 1
+  ) {
+    const receivedBytes =
+      Number(received);
+
+    const totalBytes =
+      Number(total);
+
+    if (
+      !Number.isFinite(receivedBytes) ||
+      !Number.isFinite(totalBytes) ||
+      totalBytes <= 0
+    ) {
+      return;
+    }
+
+    const safeUnitCount =
+      Math.max(
+        1,
+        unitCount
+      );
+
+    const unitRatio =
+      Math.max(
+        0,
+        Math.min(
+          1,
+          receivedBytes /
+            totalBytes
+        )
+      );
+
+    const overallRatio =
+      (
+        Math.max(
+          0,
+          unitIndex
+        ) +
+        unitRatio
+      ) /
+      safeUnitCount;
+
+    setDownloadProgress(
+      Math.min(
+        99,
+        Math.max(
+          0,
+          Math.round(
+            overallRatio * 100
+          )
+        )
+      )
+    );
+  }
+
   useEffect(() => {
     let active = true;
 
@@ -1889,6 +1954,7 @@ export default function ProductDetailScreen({
     }
 
     setProductAccessLoading(true);
+    setDownloadProgress(0);
 
     try {
       /*
@@ -2098,6 +2164,22 @@ export default function ProductDetailScreen({
                     .fetch(
                       "GET",
                       signedPageUrl
+                    )
+                    .progress(
+                      {
+                        interval: 150,
+                      },
+                      (
+                        received,
+                        total
+                      ) => {
+                        reportDownloadProgress(
+                          received,
+                          total,
+                          index,
+                          imagePages.length
+                        );
+                      }
                     );
 
                 temporaryPath =
@@ -2197,9 +2279,25 @@ export default function ProductDetailScreen({
                   },
                 })
                 .fetch(
-                  "GET",
-                  signedPageUrl
-                );
+                      "GET",
+                      signedPageUrl
+                    )
+                    .progress(
+                      {
+                        interval: 150,
+                      },
+                      (
+                        received,
+                        total
+                      ) => {
+                        reportDownloadProgress(
+                          received,
+                          total,
+                          index,
+                          imagePages.length
+                        );
+                      }
+                    );
 
               if (!firstSavedUri) {
                 firstSavedUri = targetPath;
@@ -2224,9 +2322,25 @@ export default function ProductDetailScreen({
                 fileCache: true,
               })
               .fetch(
-                "GET",
-                signedPageUrl
-              );
+                      "GET",
+                      signedPageUrl
+                    )
+                    .progress(
+                      {
+                        interval: 150,
+                      },
+                      (
+                        received,
+                        total
+                      ) => {
+                        reportDownloadProgress(
+                          received,
+                          total,
+                          index,
+                          imagePages.length
+                        );
+                      }
+                    );
 
             if (!firstSavedUri) {
               firstSavedUri = targetPath;
@@ -2244,6 +2358,8 @@ export default function ProductDetailScreen({
               "Tidak ada halaman yang berhasil disimpan."
             );
           }
+
+          setDownloadProgress(100);
 
           setDownloadSuccessFileUri(
             firstSavedUri
@@ -2513,6 +2629,8 @@ export default function ProductDetailScreen({
                   shouldCleanupTemporaryPath =
                     false;
 
+                  setDownloadProgress(99);
+
                   console.log(
                     "[DOWNLOAD]",
                     JSON.stringify({
@@ -2548,6 +2666,20 @@ export default function ProductDetailScreen({
                 .fetch(
                   "GET",
                   data.signedUrl
+                )
+                .progress(
+                  {
+                    interval: 150,
+                  },
+                  (
+                    received,
+                    total
+                  ) => {
+                    reportDownloadProgress(
+                      received,
+                      total
+                    );
+                  }
                 );
 
             temporaryPath =
@@ -2587,6 +2719,8 @@ export default function ProductDetailScreen({
                   !shouldCleanupTemporaryPath,
               })
             );
+
+            setDownloadProgress(100);
 
             setDownloadSuccessFileUri(
               mediaUri
@@ -2659,9 +2793,25 @@ export default function ProductDetailScreen({
             },
           })
           .fetch(
-            "GET",
-            data.signedUrl
-          );
+                  "GET",
+                  data.signedUrl
+                )
+                .progress(
+                  {
+                    interval: 150,
+                  },
+                  (
+                    received,
+                    total
+                  ) => {
+                    reportDownloadProgress(
+                      received,
+                      total
+                    );
+                  }
+                );
+
+        setDownloadProgress(100);
 
         setDownloadSuccessFileUri(
           targetPath
@@ -2685,9 +2835,25 @@ export default function ProductDetailScreen({
           fileCache: true,
         })
         .fetch(
-          "GET",
-          data.signedUrl
-        );
+                  "GET",
+                  data.signedUrl
+                )
+                .progress(
+                  {
+                    interval: 150,
+                  },
+                  (
+                    received,
+                    total
+                  ) => {
+                    reportDownloadProgress(
+                      received,
+                      total
+                    );
+                  }
+                );
+
+      setDownloadProgress(100);
 
       Alert.alert(
         "Unduhan selesai",
@@ -2708,6 +2874,10 @@ export default function ProductDetailScreen({
       );
     }
     finally {
+      setDownloadProgress(
+        null
+      );
+
       setProductAccessLoading(
         false
       );
@@ -3788,22 +3958,41 @@ export default function ProductDetailScreen({
                 styles.detailActionContent
               }
             >
-              <Download
-                size={20}
-                color="#FFFFFF"
-                strokeWidth={2}
-              />
+              {productAccessLoading ? (
+                <>
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                  />
 
-              <Text
-                style={
-                  styles.detailPrimaryButtonText
-                }
-              >
-                {productAccessLoading
-                  ? "Memproses..."
-                  : "Unduh"}
-              </Text>
+                  <Text
+                    style={
+                      styles.detailPrimaryButtonText
+                    }
+                  >
+                    {`${downloadProgress ?? 0}%`}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Download
+                    size={20}
+                    color="#FFFFFF"
+                    strokeWidth={2}
+                  />
+
+                  <Text
+                    style={
+                      styles.detailPrimaryButtonText
+                    }
+                  >
+                    Unduh
+                  </Text>
+                </>
+              )}
             </View>
+
+
           </Pressable>
         ) : (
           <Pressable
@@ -4457,6 +4646,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 7,
   },
+
 
   detailPrimaryButtonText: {
     fontFamily:
