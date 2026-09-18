@@ -275,8 +275,23 @@ export default function UploadProductScreen({
         const loadedPages:
           PickedAsset[] = [];
 
+        const currentFilePath =
+          String(
+            data.file_path ?? ""
+          )
+            .trim()
+            .toLowerCase();
+
+        const shouldLoadImagePages =
+          !currentFilePath.endsWith(
+            ".pdf"
+          );
+
         for (
-          const row of pageRows ?? []
+          const row of
+            shouldLoadImagePages
+              ? pageRows ?? []
+              : []
         ) {
           const storagePath =
             String(
@@ -2031,6 +2046,119 @@ export default function UploadProductScreen({
           throw new Error(
             "Produk tidak berhasil diperbarui."
           );
+        }
+
+        /*
+         * NON_IMAGE_STALE_PAGES_CLEANUP_V1
+         *
+         * Jika produk image berubah menjadi PDF/Word,
+         * store_product_pages lama tidak lagi menjadi
+         * source of truth.
+         *
+         * Metadata dihapus hanya SETELAH update produk
+         * berhasil. Cleanup Storage dilakukan setelah
+         * delete metadata berhasil.
+         */
+        if (
+          productFileKind !==
+            "image"
+        ) {
+          const {
+            data: stalePageRows,
+            error:
+              stalePageRowsError,
+          } =
+            await supabase
+              .from(
+                "store_product_pages"
+              )
+              .select(
+                "storage_path"
+              )
+              .eq(
+                "product_id",
+                editProductId
+              );
+
+          if (stalePageRowsError) {
+            console.warn(
+              "Halaman legacy belum dapat diaudit:",
+              stalePageRowsError
+            );
+          } else if (
+            (stalePageRows ?? [])
+              .length > 0
+          ) {
+            const stalePagePaths =
+              Array.from(
+                new Set(
+                  (
+                    stalePageRows ??
+                    []
+                  )
+                    .map(
+                      row =>
+                        String(
+                          row.storage_path ??
+                            ""
+                        ).trim()
+                    )
+                    .filter(
+                      path =>
+                        Boolean(path) &&
+                        path !==
+                          nextFilePath
+                    )
+                )
+              );
+
+            const {
+              error:
+                deletePageRowsError,
+            } =
+              await supabase
+                .from(
+                  "store_product_pages"
+                )
+                .delete()
+                .eq(
+                  "product_id",
+                  editProductId
+                );
+
+            if (
+              deletePageRowsError
+            ) {
+              console.warn(
+                "Metadata halaman legacy belum terhapus:",
+                deletePageRowsError
+              );
+            } else if (
+              stalePagePaths.length >
+              0
+            ) {
+              const {
+                error:
+                  staleStorageError,
+              } =
+                await supabase.storage
+                  .from(
+                    "store-product-files"
+                  )
+                  .remove(
+                    stalePagePaths
+                  );
+
+              if (
+                staleStorageError
+              ) {
+                console.warn(
+                  "File halaman legacy belum terhapus dari Storage:",
+                  staleStorageError
+                );
+              }
+            }
+          }
         }
 
         // Baru bersihkan file slide yang
