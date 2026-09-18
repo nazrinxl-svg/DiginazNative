@@ -28,6 +28,7 @@ import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 import { supabase } from "../lib/supabase";
 import {
   buildStoreProductFilePath,
+  buildStoreProductOriginalPath,
   buildStoreProductPagePath,
   buildStoreThumbnailPath,
 } from "../lib/storeMedia";
@@ -1490,8 +1491,12 @@ export default function UploadProductScreen({
 
 
     const originalPath =
-      `${userId}/${productId}/` +
-      `original-${batchId}-${cleanOriginalName}`;
+      buildStoreProductOriginalPath(
+        userId,
+        productId,
+        cleanOriginalName,
+        batchId
+      );
 
     const pdfPath =
       `${userId}/${productId}/` +
