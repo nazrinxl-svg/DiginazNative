@@ -884,14 +884,27 @@ export default function UploadProductScreen({
   }
 
 
-  // EDIT_SLIDES_SYNC_V1
+  // EDIT_SLIDES_SYNC_RPC_V2
   async function syncEditedImagePages(
     userId: string,
     productId: string,
-    pages: PickedAsset[]
+    pages: PickedAsset[],
+    productInput: {
+      title: string;
+      productType: string;
+      subject: string;
+      classLevel: string;
+      pricingType: "free" | "paid";
+      priceAmount: number | null;
+      description: string;
+      thumbnailPath: string | null;
+    }
   ): Promise<{
     firstStoragePath: string;
-    stalePaths: string[];
+    staleStorage: Array<{
+      bucket: string;
+      storagePath: string;
+    }>;
   }> {
     if (pages.length === 0) {
       throw new Error(
@@ -904,13 +917,8 @@ export default function UploadProductScreen({
       error: previousRowsError,
     } = await supabase
       .from("store_product_pages")
-      .select(
-        "storage_path"
-      )
-      .eq(
-        "product_id",
-        productId
-      );
+      .select("storage_path")
+      .eq("product_id", productId);
 
     if (previousRowsError) {
       throw previousRowsError;
@@ -925,42 +933,30 @@ export default function UploadProductScreen({
         )
         .filter(Boolean);
 
-    const currentPaths:
-      string[] = [];
+    const uploadedPaths: string[] = [];
 
-    const uploadedPaths:
-      string[] = [];
-
-    const rows: Array<{
-      product_id: string;
-      page_number: number;
+    const rpcPages: Array<{
       storage_path: string;
       mime_type: string;
       original_name: string | null;
+      size_bytes: number | null;
     }> = [];
 
-    let databaseWasUpdated =
-      false;
+    let rpcCommitted = false;
 
     try {
-      const batchId =
-        Date.now();
+      const batchId = Date.now();
 
       for (
         let index = 0;
         index < pages.length;
         index++
       ) {
-        const page =
-          pages[index];
+        const page = pages[index];
 
         let storagePath =
-          page.storagePath
-            ?.trim() ??
-          "";
+          page.storagePath?.trim() ?? "";
 
-        // storagePath hanya boleh dipakai
-        // jika memang berasal dari produk ini.
         if (
           storagePath &&
           !previousPaths.includes(
@@ -970,7 +966,9 @@ export default function UploadProductScreen({
           storagePath = "";
         }
 
-        // Halaman baru: baru upload.
+        let sizeBytes:
+          number | null = null;
+
         if (!storagePath) {
           const extension =
             getExtension(
@@ -1004,12 +1002,16 @@ export default function UploadProductScreen({
                 response.arrayBuffer()
             );
 
+          sizeBytes =
+            buffer.byteLength;
+
           const {
             error: uploadError,
           } =
             await supabase.storage
               .from(
-                STORE_MEDIA_BUCKETS.productFiles
+                STORE_MEDIA_BUCKETS
+                  .productFiles
               )
               .upload(
                 storagePath,
@@ -1018,9 +1020,7 @@ export default function UploadProductScreen({
                   contentType:
                     page.mimeType ??
                     "image/jpeg",
-
-                  upsert:
-                    false,
+                  upsert: false,
                 }
               );
 
@@ -1041,109 +1041,156 @@ export default function UploadProductScreen({
                   pages.length
                 )
               ) *
-                65
+                60
           );
         }
 
-        currentPaths.push(
-          storagePath
-        );
-
-        rows.push({
-          product_id:
-            productId,
-
-          page_number:
-            index + 1,
-
+        rpcPages.push({
           storage_path:
             storagePath,
-
           mime_type:
             page.mimeType ??
             "image/jpeg",
-
           original_name:
             page.fileName ??
             null,
+          size_bytes:
+            sizeBytes,
         });
       }
 
       const {
-        error: upsertError,
-      } =
-        await supabase
-          .from(
-            "store_product_pages"
-          )
-          .upsert(
-            rows,
-            {
-              onConflict:
-                "product_id,page_number",
+        data: rpcData,
+        error: rpcError,
+      } = await supabase.rpc(
+        "sync_store_product_image_pages_v1",
+        {
+          p_product_id:
+            productId,
+          p_title:
+            productInput.title,
+          p_product_type:
+            productInput.productType,
+          p_subject:
+            productInput.subject,
+          p_class_level:
+            productInput.classLevel,
+          p_pricing_type:
+            productInput.pricingType,
+          p_price_amount:
+            productInput.priceAmount,
+          p_description:
+            productInput.description,
+          p_thumbnail_path:
+            productInput.thumbnailPath,
+          p_pages:
+            rpcPages,
+        }
+      );
+
+      if (rpcError) {
+        throw rpcError;
+      }
+
+      rpcCommitted = true;
+
+      const rpcResult =
+        (
+          rpcData &&
+          typeof rpcData === "object"
+        )
+          ? rpcData as {
+              first_storage_path?:
+                unknown;
+              stale_storage?:
+                unknown;
             }
-          );
+          : null;
 
-      if (upsertError) {
-        throw upsertError;
-      }
+      const firstStoragePath =
+        String(
+          rpcResult
+            ?.first_storage_path ??
+          rpcPages[0]
+            ?.storage_path ??
+          ""
+        ).trim();
 
-      databaseWasUpdated =
-        true;
-
-      const {
-        error: trimError,
-      } =
-        await supabase
-          .from(
-            "store_product_pages"
-          )
-          .delete()
-          .eq(
-            "product_id",
-            productId
-          )
-          .gt(
-            "page_number",
-            pages.length
-          );
-
-      if (trimError) {
-        throw trimError;
-      }
-
-      const stalePaths =
-        previousPaths.filter(
-          path =>
-            !currentPaths.includes(
-              path
-            )
+      if (!firstStoragePath) {
+        throw new Error(
+          "RPC tidak mengembalikan halaman pertama."
         );
+      }
+
+      const staleStorage:
+        Array<{
+          bucket: string;
+          storagePath: string;
+        }> = [];
+
+      if (
+        Array.isArray(
+          rpcResult?.stale_storage
+        )
+      ) {
+        for (
+          const item of
+          rpcResult.stale_storage
+        ) {
+          if (
+            !item ||
+            typeof item !== "object"
+          ) {
+            continue;
+          }
+
+          const record =
+            item as {
+              bucket?: unknown;
+              storage_path?: unknown;
+            };
+
+          const bucket =
+            String(
+              record.bucket ?? ""
+            ).trim();
+
+          const storagePath =
+            String(
+              record.storage_path ?? ""
+            ).trim();
+
+          if (
+            bucket &&
+            storagePath
+          ) {
+            staleStorage.push({
+              bucket,
+              storagePath,
+            });
+          }
+        }
+      }
 
       return {
-        firstStoragePath:
-          currentPaths[0],
-
-        stalePaths,
+        firstStoragePath,
+        staleStorage,
       };
-    }
-    catch (error) {
-      // Kalau DB belum berubah,
-      // upload baru aman dibersihkan.
+    } catch (error) {
       if (
-        !databaseWasUpdated &&
+        !rpcCommitted &&
         uploadedPaths.length > 0
       ) {
         try {
           await supabase.storage
             .from(
-              "store-product-files"
+              STORE_MEDIA_BUCKETS
+                .productFiles
             )
             .remove(
               uploadedPaths
             );
-        }
-        catch {
+        } catch {
           // cleanup best effort
         }
       }
@@ -1151,6 +1198,7 @@ export default function UploadProductScreen({
       throw error;
     }
   }
+
 
   async function chooseProductFile() {
     setErrorMessage("");
@@ -2258,17 +2306,22 @@ export default function UploadProductScreen({
         let editImageSync:
           {
             firstStoragePath: string;
-            stalePaths: string[];
+            staleStorage: Array<{
+              bucket: string;
+              storagePath: string;
+            }>;
           } |
           null = null;
+
+        let updatedId:
+          string | null = null;
 
         if (
           productFileKind ===
             "image"
         ) {
           if (
-            productPages.length ===
-            0
+            productPages.length === 0
           ) {
             throw new Error(
               "Produk gambar minimal memiliki 1 halaman."
@@ -2279,66 +2332,100 @@ export default function UploadProductScreen({
             await syncEditedImagePages(
               user.id,
               existing.id,
-              productPages
+              productPages,
+              {
+                title:
+                  cleanTitle,
+                productType,
+                subject:
+                  cleanSubject,
+                classLevel,
+                pricingType,
+                priceAmount,
+                description:
+                  cleanDescription,
+                thumbnailPath:
+                  nextThumbnailPath,
+              }
             );
 
           updateUploadProgress(85);
 
           nextOriginalFilePath =
             null;
-
           nextOriginalFileName =
             null;
-
           nextOriginalMimeType =
             null;
 
           nextFilePath =
             editImageSync
               .firstStoragePath;
+
+          updatedId =
+            existing.id;
+        } else {
+          const {
+            data: updated,
+            error: updateError,
+          } = await supabase
+            .from("store_products")
+            .update({
+              title:
+                cleanTitle,
+              product_type:
+                productType,
+              subject:
+                cleanSubject,
+              class_level:
+                classLevel,
+              pricing_type:
+                pricingType,
+              price_amount:
+                priceAmount,
+              original_price_amount:
+                null,
+              description:
+                cleanDescription,
+              thumbnail_path:
+                nextThumbnailPath,
+              file_path:
+                nextFilePath,
+              original_file_path:
+                nextOriginalFilePath,
+              original_file_name:
+                nextOriginalFileName,
+              original_mime_type:
+                nextOriginalMimeType,
+              status:
+                "published",
+            })
+            .eq(
+              "id",
+              editProductId
+            )
+            .eq(
+              "creator_user_id",
+              user.id
+            )
+            .select("id")
+            .single();
+
+          if (updateError) {
+            throw updateError;
+          }
+
+          if (!updated?.id) {
+            throw new Error(
+              "Produk tidak berhasil diperbarui."
+            );
+          }
+
+          updatedId =
+            updated.id;
         }
 
-
-        const {
-          data: updated,
-          error: updateError,
-        } = await supabase
-          .from("store_products")
-          .update({
-            title: cleanTitle,
-            product_type: productType,
-            subject: cleanSubject,
-            class_level: classLevel,
-            pricing_type: pricingType,
-            price_amount: priceAmount,
-            original_price_amount: null,
-            description:
-              cleanDescription,
-            thumbnail_path:
-              nextThumbnailPath,
-            file_path:
-              nextFilePath,
-            original_file_path:
-              nextOriginalFilePath,
-            original_file_name:
-              nextOriginalFileName,
-            original_mime_type:
-              nextOriginalMimeType,
-            status: "published",
-          })
-          .eq("id", editProductId)
-          .eq(
-            "creator_user_id",
-            user.id
-          )
-          .select("id")
-          .single();
-
-        if (updateError) {
-          throw updateError;
-        }
-
-        if (!updated?.id) {
+        if (!updatedId) {
           throw new Error(
             "Produk tidak berhasil diperbarui."
           );
@@ -2478,29 +2565,93 @@ export default function UploadProductScreen({
           }
         }
 
-        // Baru bersihkan file slide yang
-        // benar-benar dihapus setelah save sukses.
-        if (
-          editImageSync &&
-          editImageSync.stalePaths.length >
-            0
-        ) {
-          const {
-            error: cleanupPagesError,
-          } =
-            await supabase.storage
-              .from(
-                "store-product-files"
+        /*
+         * Cleanup hanya object yang RPC
+         * nyatakan benar-benar stale.
+         */
+        if (editImageSync) {
+          const staleProductFiles =
+            Array.from(
+              new Set(
+                editImageSync
+                  .staleStorage
+                  .filter(
+                    item =>
+                      item.bucket ===
+                      STORE_MEDIA_BUCKETS
+                        .productFiles
+                  )
+                  .map(
+                    item =>
+                      item.storagePath
+                  )
               )
-              .remove(
-                editImageSync.stalePaths
-              );
-
-          if (cleanupPagesError) {
-            console.warn(
-              "Slide lama belum terhapus dari Storage:",
-              cleanupPagesError
             );
+
+          if (
+            staleProductFiles.length > 0
+          ) {
+            const {
+              error:
+                cleanupPagesError,
+            } =
+              await supabase.storage
+                .from(
+                  STORE_MEDIA_BUCKETS
+                    .productFiles
+                )
+                .remove(
+                  staleProductFiles
+                );
+
+            if (cleanupPagesError) {
+              console.warn(
+                "Storage halaman stale belum terhapus:",
+                cleanupPagesError
+              );
+            }
+          }
+
+          const staleOriginalFiles =
+            Array.from(
+              new Set(
+                editImageSync
+                  .staleStorage
+                  .filter(
+                    item =>
+                      item.bucket ===
+                      STORE_MEDIA_BUCKETS
+                        .productOriginals
+                  )
+                  .map(
+                    item =>
+                      item.storagePath
+                  )
+              )
+            );
+
+          if (
+            staleOriginalFiles.length > 0
+          ) {
+            const {
+              error:
+                cleanupOriginalError,
+            } =
+              await supabase.storage
+                .from(
+                  STORE_MEDIA_BUCKETS
+                    .productOriginals
+                )
+                .remove(
+                  staleOriginalFiles
+                );
+
+            if (cleanupOriginalError) {
+              console.warn(
+                "Storage original stale belum terhapus:",
+                cleanupOriginalError
+              );
+            }
           }
         }
 
@@ -2555,6 +2706,8 @@ export default function UploadProductScreen({
         }
 
         if (
+          productFileKind !==
+            "image" &&
           existing.original_file_path &&
           existing.original_file_path !==
             nextOriginalFilePath
