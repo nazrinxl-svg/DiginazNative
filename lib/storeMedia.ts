@@ -54,6 +54,50 @@ export type StoreProductMediaRole =
   | "page"
   | "original";
 
+export const STORE_MEDIA_UPLOAD_LIMITS = {
+  maxImagePages: 15,
+  thumbnailBytes: 2 * 1024 * 1024,
+  productFileBytes: 50 * 1024 * 1024,
+  productOriginalBytes: 50 * 1024 * 1024,
+} as const;
+
+export type StoreMediaUploadSizeLimitKey =
+  | "thumbnailBytes"
+  | "productFileBytes"
+  | "productOriginalBytes";
+
+export function assertStoreMediaUploadSize(
+  sizeBytes: number,
+  limitKey: StoreMediaUploadSizeLimitKey,
+  label: string
+) {
+  const safeSizeBytes =
+    Math.max(
+      0,
+      Math.trunc(sizeBytes)
+    );
+
+  const limitBytes =
+    STORE_MEDIA_UPLOAD_LIMITS[
+      limitKey
+    ];
+
+  if (
+    safeSizeBytes >
+    limitBytes
+  ) {
+    const limitMb =
+      Math.round(
+        limitBytes /
+          (1024 * 1024)
+      );
+
+    throw new Error(
+      `${label} maksimal ${limitMb} MB.`
+    );
+  }
+}
+
 export const STORE_MEDIA_SIGNED_URL_TTL = {
   previewSeconds: 3600,
   pdfViewerSeconds: 300,

@@ -31,6 +31,9 @@ import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 import { supabase } from "../lib/supabase";
 import {
   STORE_MEDIA_BUCKETS,
+  STORE_MEDIA_UPLOAD_LIMITS,
+  assertStoreMediaUploadSize,
+  type StoreMediaUploadSizeLimitKey,
   buildStoreProductFilePath,
   buildStoreProductOriginalPath,
   buildStoreProductPagePath,
@@ -54,6 +57,7 @@ type PickedAsset = {
   uri: string;
   fileName?: string | null;
   mimeType?: string | null;
+  sizeBytes?: number | null;
 
   // EDIT_EXISTING_PAGE:
   // Jika terisi, halaman ini sudah ada di Storage.
@@ -592,6 +596,53 @@ function getExtension(
   return extension || fallback;
 }
 
+function getPickedAssetSizeBytes(
+  value: unknown
+): number | null {
+  const parsed =
+    Number(value);
+
+  if (
+    !Number.isFinite(parsed) ||
+    parsed < 0
+  ) {
+    return null;
+  }
+
+  return Math.trunc(parsed);
+}
+
+async function fetchStoreUploadBuffer(
+  asset: PickedAsset,
+  limitKey: StoreMediaUploadSizeLimitKey,
+  label: string
+): Promise<ArrayBuffer> {
+  if (
+    asset.sizeBytes != null
+  ) {
+    assertStoreMediaUploadSize(
+      asset.sizeBytes,
+      limitKey,
+      label
+    );
+  }
+
+  const buffer =
+    await fetch(
+      asset.uri
+    ).then(response =>
+      response.arrayBuffer()
+    );
+
+  assertStoreMediaUploadSize(
+    buffer.byteLength,
+    limitKey,
+    label
+  );
+
+  return buffer;
+}
+
 export default function UploadProductScreen({
   onClose,
   onUploaded,
@@ -1043,6 +1094,10 @@ export default function UploadProductScreen({
         mimeType:
           image.mime ??
           "image/jpeg",
+        sizeBytes:
+          getPickedAssetSizeBytes(
+            image.size
+          ),
       });
     } catch (error) {
       const message =
@@ -1146,6 +1201,16 @@ export default function UploadProductScreen({
       return;
     }
 
+    if (
+      pages.length >
+      STORE_MEDIA_UPLOAD_LIMITS
+        .maxImagePages
+    ) {
+      throw new Error(
+        `Produk gambar maksimal ${STORE_MEDIA_UPLOAD_LIMITS.maxImagePages} halaman.`
+      );
+    }
+
     const {
       data: previousRows,
       error: previousRowsError,
@@ -1242,12 +1307,7 @@ export default function UploadProductScreen({
           );
 
         const buffer =
-          await fetch(
-            page.uri
-          ).then(
-            response =>
-              response.arrayBuffer()
-          );
+          await fetchStoreUploadBuffer(page, "productFileBytes", "Gambar produk");
 
         const {
           error: uploadError,
@@ -1467,6 +1527,16 @@ export default function UploadProductScreen({
       );
     }
 
+    if (
+      pages.length >
+      STORE_MEDIA_UPLOAD_LIMITS
+        .maxImagePages
+    ) {
+      throw new Error(
+        `Produk gambar maksimal ${STORE_MEDIA_UPLOAD_LIMITS.maxImagePages} halaman.`
+      );
+    }
+
     const {
       data: previousRows,
       error: previousRowsError,
@@ -1550,12 +1620,7 @@ export default function UploadProductScreen({
             );
 
           const buffer =
-            await fetch(
-              page.uri
-            ).then(
-              response =>
-                response.arrayBuffer()
-            );
+            await fetchStoreUploadBuffer(page, "productFileBytes", "Gambar produk");
 
           sizeBytes =
             buffer.byteLength;
@@ -1796,6 +1861,10 @@ export default function UploadProductScreen({
             multiple:
               true,
 
+            maxFiles:
+              STORE_MEDIA_UPLOAD_LIMITS
+                .maxImagePages,
+
             compressImageQuality:
               0.9,
           });
@@ -1839,6 +1908,10 @@ export default function UploadProductScreen({
                     `halaman-${Date.now()}-${index + 1}.${extension}`,
 
                   mimeType,
+                  sizeBytes:
+                    getPickedAssetSizeBytes(
+                      image.size
+                    ),
                 };
               }
             );
@@ -1849,14 +1922,27 @@ export default function UploadProductScreen({
           return;
         }
 
+        const combinedPages = [
+          ...productPages,
+          ...pickedPages,
+        ];
+
         const nextPages =
-          [
-            ...productPages,
-            ...pickedPages,
-          ].slice(
+          combinedPages.slice(
             0,
-            20
+            STORE_MEDIA_UPLOAD_LIMITS
+              .maxImagePages
           );
+
+        if (
+          combinedPages.length >
+          STORE_MEDIA_UPLOAD_LIMITS
+            .maxImagePages
+        ) {
+          setErrorMessage(
+            `Maksimal ${STORE_MEDIA_UPLOAD_LIMITS.maxImagePages} gambar per produk. Gambar selebihnya tidak ditambahkan.`
+          );
+        }
 
         setProductPages(
           nextPages
@@ -1993,6 +2079,10 @@ export default function UploadProductScreen({
             ? "application/pdf"
             : "application/octet-stream"
         ),
+      sizeBytes:
+        getPickedAssetSizeBytes(
+          asset.size
+        ),
     });
   }
 
@@ -2059,6 +2149,10 @@ export default function UploadProductScreen({
         mimeType:
           asset.mimeType ??
           "application/pdf",
+        sizeBytes:
+          getPickedAssetSizeBytes(
+            asset.size
+          ),
       });
     }
     catch (error) {
@@ -2163,12 +2257,7 @@ export default function UploadProductScreen({
 
 
     const wordBuffer =
-      await fetch(
-        wordAsset.uri
-      ).then(
-        response =>
-          response.arrayBuffer()
-      );
+      await fetchStoreUploadBuffer(wordAsset, "productOriginalBytes", "File Word");
 
     if (
       wordBuffer.byteLength <= 0
@@ -2180,12 +2269,7 @@ export default function UploadProductScreen({
 
 
     const previewBuffer =
-      await fetch(
-        previewAsset.uri
-      ).then(
-        response =>
-          response.arrayBuffer()
-      );
+      await fetchStoreUploadBuffer(previewAsset, "productFileBytes", "PDF pratinjau");
 
     if (
       previewBuffer.byteLength <= 0
@@ -2325,6 +2409,18 @@ export default function UploadProductScreen({
     ) {
       setErrorMessage(
         "Pilih file produk terlebih dahulu."
+      );
+      return;
+    }
+
+    if (
+      productFileKind === "image" &&
+      productPages.length >
+        STORE_MEDIA_UPLOAD_LIMITS
+          .maxImagePages
+    ) {
+      setErrorMessage(
+        `Produk gambar maksimal ${STORE_MEDIA_UPLOAD_LIMITS.maxImagePages} halaman.`
       );
       return;
     }
@@ -2506,10 +2602,7 @@ export default function UploadProductScreen({
             );
 
           const thumbnailBuffer =
-            await fetch(thumbnail.uri)
-              .then((response) =>
-                response.arrayBuffer()
-              );
+            await fetchStoreUploadBuffer(thumbnail, "thumbnailBytes", "Cover produk");
 
           const {
             error: thumbnailError,
@@ -2709,12 +2802,7 @@ export default function UploadProductScreen({
               );
 
             const fileBuffer =
-              await fetch(
-                productFile.uri
-              ).then(
-                response =>
-                  response.arrayBuffer()
-              );
+              await fetchStoreUploadBuffer(productFile, "productFileBytes", "File PDF");
 
             const {
               error: fileError,
@@ -3365,10 +3453,7 @@ export default function UploadProductScreen({
           );
 
         const thumbnailBuffer =
-          await fetch(thumbnail.uri)
-            .then((response) =>
-              response.arrayBuffer()
-            );
+          await fetchStoreUploadBuffer(thumbnail, "thumbnailBytes", "Cover produk");
 
         const {
           error: thumbnailError,
@@ -3542,12 +3627,7 @@ export default function UploadProductScreen({
           );
 
         const fileBuffer =
-          await fetch(
-            productFile.uri
-          ).then(
-            response =>
-              response.arrayBuffer()
-          );
+          await fetchStoreUploadBuffer(productFile, "productFileBytes", productFileKind === "image" ? "Gambar produk" : "File PDF");
 
         const {
           error: fileError,
@@ -4590,7 +4670,7 @@ export default function UploadProductScreen({
                         styles.fileName
                       }
                     >
-                      JPG, PNG atau WEBP • maksimal 20 halaman
+                      JPG, PNG atau WEBP • maksimal 15 halaman
                     </Text>
                   </View>
                 </Pressable>
