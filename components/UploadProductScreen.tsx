@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  PanResponder,
   ScrollView,
   StyleSheet,
   Text,
@@ -19,6 +21,7 @@ import {
   Upload,
   ChevronDown,
   ChevronUp,
+  X,
 } from "lucide-react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ImageCropPicker from "react-native-image-crop-picker";
@@ -56,6 +59,423 @@ type PickedAsset = {
   // Jika terisi, halaman ini sudah ada di Storage.
   storagePath?: string | null;
 };
+
+const PRODUCT_PAGE_SWAP_THRESHOLD = 35;
+const PRODUCT_PAGE_LONG_PRESS_MS = 300;
+
+type DraggableProductPageCardProps = {
+  page: PickedAsset;
+  index: number;
+  totalPages: number;
+  onMove: (
+    fromIndex: number,
+    toIndex: number
+  ) => void;
+  onRemove: () => void;
+};
+
+function DraggableProductPageCard({
+  page,
+  index,
+  totalPages,
+  onMove,
+  onRemove,
+}: DraggableProductPageCardProps) {
+  const [dragging, setDragging] =
+    useState(false);
+
+  const dragX =
+    useRef(
+      new Animated.Value(0)
+    ).current;
+
+  const dragTimerRef =
+    useRef<
+      ReturnType<typeof setTimeout> |
+        null
+    >(null);
+
+  const draggingRef =
+    useRef(false);
+
+  /*
+   * Menyimpan posisi dx terakhir saat
+   * halaman berhasil ditukar.
+   */
+  const lastSwapDxRef =
+    useRef(0);
+
+  /*
+   * Swipe biasa tidak boleh menjadi reorder.
+   * Reorder baru siap setelah long-press.
+   */
+  const dragReadyRef =
+    useRef(false);
+
+  const touchStartXRef =
+    useRef(0);
+
+  const touchStartYRef =
+    useRef(0);
+
+  const indexRef =
+    useRef(index);
+
+  const totalPagesRef =
+    useRef(totalPages);
+
+  const onMoveRef =
+    useRef(onMove);
+
+  indexRef.current =
+    index;
+
+  totalPagesRef.current =
+    totalPages;
+
+  onMoveRef.current =
+    onMove;
+
+  function clearDragTimer() {
+    if (
+      dragTimerRef.current !== null
+    ) {
+      clearTimeout(
+        dragTimerRef.current
+      );
+
+      dragTimerRef.current =
+        null;
+    }
+  }
+
+  function resetDrag() {
+    clearDragTimer();
+
+    draggingRef.current =
+      false;
+
+    dragReadyRef.current =
+      false;
+
+    lastSwapDxRef.current =
+      0;
+
+    setDragging(false);
+
+    dragX.setValue(0);
+  }
+
+  useEffect(() => {
+    return () => {
+      clearDragTimer();
+    };
+  }, []);
+
+  const panResponder =
+    useRef(
+      PanResponder.create({
+        /*
+         * Jangan ambil touch ketika baru
+         * menyentuh gambar. Ini membuat
+         * ScrollView horizontal tetap normal.
+         */
+        onStartShouldSetPanResponder:
+          () => false,
+
+        onMoveShouldSetPanResponderCapture:
+          (_, gestureState) => {
+            if (
+              !dragReadyRef.current
+            ) {
+              return false;
+            }
+
+            return (
+              Math.abs(
+                gestureState.dx
+              ) >= 4 &&
+              Math.abs(
+                gestureState.dx
+              ) >
+                Math.abs(
+                  gestureState.dy
+                )
+            );
+          },
+
+        onMoveShouldSetPanResponder:
+          (_, gestureState) => {
+            if (
+              !dragReadyRef.current
+            ) {
+              return false;
+            }
+
+            return (
+              Math.abs(
+                gestureState.dx
+              ) >= 4 &&
+              Math.abs(
+                gestureState.dx
+              ) >
+                Math.abs(
+                  gestureState.dy
+                )
+            );
+          },
+
+        onPanResponderGrant:
+          () => {
+            clearDragTimer();
+
+            dragReadyRef.current =
+              false;
+
+            draggingRef.current =
+              true;
+
+            lastSwapDxRef.current =
+              0;
+
+            setDragging(true);
+          },
+
+        onPanResponderMove:
+          (_, gestureState) => {
+            if (
+              !draggingRef.current
+            ) {
+              return;
+            }
+
+            const relativeDx =
+              gestureState.dx -
+              lastSwapDxRef.current;
+
+            dragX.setValue(
+              relativeDx
+            );
+
+            const fromIndex =
+              indexRef.current;
+
+            const maxIndex =
+              totalPagesRef.current -
+              1;
+
+            if (
+              relativeDx >=
+                PRODUCT_PAGE_SWAP_THRESHOLD &&
+              fromIndex < maxIndex
+            ) {
+              onMoveRef.current(
+                fromIndex,
+                fromIndex + 1
+              );
+
+              lastSwapDxRef.current =
+                gestureState.dx;
+
+              dragX.setValue(0);
+
+              return;
+            }
+
+            if (
+              relativeDx <=
+                -PRODUCT_PAGE_SWAP_THRESHOLD &&
+              fromIndex > 0
+            ) {
+              onMoveRef.current(
+                fromIndex,
+                fromIndex - 1
+              );
+
+              lastSwapDxRef.current =
+                gestureState.dx;
+
+              dragX.setValue(0);
+            }
+          },
+
+        onPanResponderRelease:
+          () => {
+            resetDrag();
+          },
+
+        onPanResponderTerminate:
+          () => {
+            resetDrag();
+          },
+
+        onPanResponderTerminationRequest:
+          () =>
+            !draggingRef.current,
+      })
+    ).current;
+
+
+  return (
+    <Animated.View
+      style={[
+        styles.productPageCard,
+        dragging &&
+          styles.productPageCardDragging,
+        {
+          transform: [
+            {
+              translateX:
+                dragX,
+            },
+            {
+              scale:
+                dragging
+                  ? 1.08
+                  : 1,
+            },
+          ],
+        },
+      ]}
+    >
+      <View
+        {...panResponder.panHandlers}
+        onTouchStart={event => {
+          clearDragTimer();
+
+          dragReadyRef.current =
+            false;
+
+          draggingRef.current =
+            false;
+
+          lastSwapDxRef.current =
+            0;
+
+          touchStartXRef.current =
+            event.nativeEvent.pageX;
+
+          touchStartYRef.current =
+            event.nativeEvent.pageY;
+
+          dragTimerRef.current =
+            setTimeout(
+              () => {
+                dragReadyRef.current =
+                  true;
+              },
+              PRODUCT_PAGE_LONG_PRESS_MS
+            );
+        }}
+        onTouchMove={event => {
+          if (
+            dragReadyRef.current ||
+            draggingRef.current
+          ) {
+            return;
+          }
+
+          const dx =
+            event.nativeEvent.pageX -
+            touchStartXRef.current;
+
+          const dy =
+            event.nativeEvent.pageY -
+            touchStartYRef.current;
+
+          /*
+           * Jari langsung bergerak =
+           * niat scroll, bukan reorder.
+           */
+          if (
+            Math.abs(dx) > 8 ||
+            Math.abs(dy) > 8
+          ) {
+            clearDragTimer();
+          }
+        }}
+        onTouchEnd={() => {
+          if (
+            !draggingRef.current
+          ) {
+            clearDragTimer();
+
+            dragReadyRef.current =
+              false;
+          }
+        }}
+        onTouchCancel={() => {
+          if (
+            !draggingRef.current
+          ) {
+            clearDragTimer();
+
+            dragReadyRef.current =
+              false;
+          }
+        }}
+        style={
+          styles.productPageDragSurface
+        }
+      >
+        <View
+          style={
+            styles.productPageImageWrap
+          }
+        >
+          <Image
+            source={{
+              uri: page.uri,
+            }}
+            style={
+              styles.productPageImage
+            }
+            resizeMode="contain"
+          />
+
+          {dragging ? (
+            <View
+              style={
+                styles.productPageDragBadge
+              }
+            >
+              <Text
+                style={
+                  styles.productPageDragBadgeText
+                }
+              >
+                Halaman {index + 1}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+
+        <Text
+          style={
+            styles.productPageNumber
+          }
+        >
+          Halaman {index + 1}
+        </Text>
+      </View>
+
+      <Pressable
+        onPress={onRemove}
+        hitSlop={8}
+        style={
+          styles.productPageRemove
+        }
+      >
+        <X
+          size={14}
+          color="#FFFFFF"
+          strokeWidth={2.4}
+        />
+      </Pressable>
+    </Animated.View>
+  );
+}
+
 
 const PRODUCT_TYPES = [
   "LKPD",
@@ -575,6 +995,50 @@ export default function UploadProductScreen({
       nextPages[0] ??
       null
     );
+  }
+
+
+  function moveProductPage(
+    fromIndex: number,
+    toIndex: number
+  ) {
+    if (
+      fromIndex === toIndex ||
+      fromIndex < 0 ||
+      toIndex < 0 ||
+      fromIndex >=
+        productPages.length ||
+      toIndex >=
+        productPages.length
+    ) {
+      return;
+    }
+
+    const nextPages = [
+      ...productPages,
+    ];
+
+    const [movedPage] =
+      nextPages.splice(
+        fromIndex,
+        1
+      );
+
+    nextPages.splice(
+      toIndex,
+      0,
+      movedPage
+    );
+
+    setProductPages(
+      nextPages
+    );
+
+    setProductFile(
+      nextPages[0] ?? null
+    );
+
+    setErrorMessage("");
   }
 
 
@@ -4045,7 +4509,7 @@ export default function UploadProductScreen({
                     styles.productPageHint
                   }
                 >
-                  Setiap gambar menjadi satu halaman. Preview menggunakan rasio A4 dan gambar tidak dipotong.
+                  Tekan dan tahan gambar, lalu geser ke kiri atau kanan untuk mengubah urutan halaman.
                 </Text>
 
                 {productPages.length >
@@ -4065,65 +4529,37 @@ export default function UploadProductScreen({
                         page,
                         index
                       ) => (
-                        <View
+                        <DraggableProductPageCard
                           key={
-                            page.uri +
-                            index
+                            page.storagePath ??
+                            page.uri
                           }
-                          style={
-                            styles.productPageCard
+                          page={page}
+                          index={index}
+                          totalPages={
+                            productPages.length
                           }
-                        >
-                          <Image
-                            source={{
-                              uri:
-                                page.uri,
-                            }}
-                            style={
-                              styles.productPageImage
-                            }
-                            resizeMode="contain"
-                          />
-
-                          <Text
-                            style={
-                              styles.productPageNumber
-                            }
-                          >
-                            Halaman {index + 1}
-                          </Text>
-
-                          <Pressable
-                            onPress={() => {
-                              if (
-                                editProductId &&
-                                productPages.length <=
-                                  1
-                              ) {
-                                setErrorMessage(
-                                  "Produk gambar minimal memiliki 1 halaman."
-                                );
-                                return;
-                              }
-
-                              removeProductPage(
-                                index
+                          onMove={
+                            moveProductPage
+                          }
+                          onRemove={() => {
+                            if (
+                              editProductId &&
+                              productPages.length <=
+                                1
+                            ) {
+                              setErrorMessage(
+                                "Produk gambar minimal memiliki 1 halaman."
                               );
-                            }}
-                            hitSlop={8}
-                            style={
-                              styles.productPageRemove
+
+                              return;
                             }
-                          >
-                            <Text
-                              style={
-                                styles.productPageRemoveText
-                              }
-                            >
-                              ×
-                            </Text>
-                          </Pressable>
-                        </View>
+
+                            removeProductPage(
+                              index
+                            );
+                          }}
+                        />
                       )
                     )}
                   </ScrollView>
@@ -4537,6 +4973,42 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: "#FFFFFF",
     position: "relative",
+  },
+
+  productPageCardDragging: {
+    borderColor: "#2563EB",
+    borderWidth: 2,
+    backgroundColor: "#EFF6FF",
+    elevation: 10,
+    zIndex: 20,
+  },
+
+  productPageDragSurface: {
+    alignItems: "center",
+  },
+
+  productPageImageWrap: {
+    position: "relative",
+  },
+
+  productPageDragBadge: {
+    position: "absolute",
+    left: 5,
+    right: 5,
+    top: 5,
+    minHeight: 24,
+    borderRadius: 7,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+  },
+
+  productPageDragBadgeText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 9,
+    color: "#FFFFFF",
   },
 
   productPageImage: {
