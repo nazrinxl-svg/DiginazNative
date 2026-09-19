@@ -60,7 +60,9 @@ type PickedAsset = {
   storagePath?: string | null;
 };
 
-const PRODUCT_PAGE_SWAP_THRESHOLD = 35;
+const PRODUCT_PAGE_SLOT_SIZE = 106;
+const PRODUCT_PAGE_SWAP_THRESHOLD =
+  PRODUCT_PAGE_SLOT_SIZE / 2;
 const PRODUCT_PAGE_LONG_PRESS_MS = 300;
 
 type DraggableProductPageCardProps = {
@@ -102,7 +104,7 @@ function DraggableProductPageCard({
    * Menyimpan posisi dx terakhir saat
    * halaman berhasil ditukar.
    */
-  const lastSwapDxRef =
+  const dragLayoutOffsetRef =
     useRef(0);
 
   /*
@@ -152,18 +154,56 @@ function DraggableProductPageCard({
   function resetDrag() {
     clearDragTimer();
 
+    dragX.stopAnimation();
+
     draggingRef.current =
       false;
 
     dragReadyRef.current =
       false;
 
-    lastSwapDxRef.current =
+    dragLayoutOffsetRef.current =
       0;
 
     setDragging(false);
 
     dragX.setValue(0);
+  }
+
+  function settleDrag() {
+    clearDragTimer();
+
+    dragReadyRef.current =
+      false;
+
+    draggingRef.current =
+      false;
+
+    Animated.spring(
+      dragX,
+      {
+        toValue: 0,
+
+        stiffness: 300,
+        damping: 30,
+        mass: 0.7,
+
+        useNativeDriver:
+          true,
+      }
+    ).start(
+      ({ finished }) => {
+        if (
+          finished &&
+          !draggingRef.current
+        ) {
+          dragLayoutOffsetRef.current =
+            0;
+
+          setDragging(false);
+        }
+      }
+    );
   }
 
   useEffect(() => {
@@ -235,7 +275,7 @@ function DraggableProductPageCard({
             draggingRef.current =
               true;
 
-            lastSwapDxRef.current =
+            dragLayoutOffsetRef.current =
               0;
 
             setDragging(true);
@@ -251,7 +291,7 @@ function DraggableProductPageCard({
 
             const relativeDx =
               gestureState.dx -
-              lastSwapDxRef.current;
+              dragLayoutOffsetRef.current;
 
             dragX.setValue(
               relativeDx
@@ -274,10 +314,13 @@ function DraggableProductPageCard({
                 fromIndex + 1
               );
 
-              lastSwapDxRef.current =
-                gestureState.dx;
+              dragLayoutOffsetRef.current +=
+                PRODUCT_PAGE_SLOT_SIZE;
 
-              dragX.setValue(0);
+              dragX.setValue(
+                gestureState.dx -
+                  dragLayoutOffsetRef.current
+              );
 
               return;
             }
@@ -292,21 +335,24 @@ function DraggableProductPageCard({
                 fromIndex - 1
               );
 
-              lastSwapDxRef.current =
-                gestureState.dx;
+              dragLayoutOffsetRef.current -=
+                PRODUCT_PAGE_SLOT_SIZE;
 
-              dragX.setValue(0);
+              dragX.setValue(
+                gestureState.dx -
+                  dragLayoutOffsetRef.current
+              );
             }
           },
 
         onPanResponderRelease:
           () => {
-            resetDrag();
+            settleDrag();
           },
 
         onPanResponderTerminate:
           () => {
-            resetDrag();
+            settleDrag();
           },
 
         onPanResponderTerminationRequest:
@@ -331,7 +377,7 @@ function DraggableProductPageCard({
             {
               scale:
                 dragging
-                  ? 1.08
+                  ? 1.05
                   : 1,
             },
           ],
@@ -343,13 +389,19 @@ function DraggableProductPageCard({
         onTouchStart={event => {
           clearDragTimer();
 
+          dragX.stopAnimation();
+
+          dragX.setValue(0);
+
+          setDragging(false);
+
           dragReadyRef.current =
             false;
 
           draggingRef.current =
             false;
 
-          lastSwapDxRef.current =
+          dragLayoutOffsetRef.current =
             0;
 
           touchStartXRef.current =
@@ -388,8 +440,8 @@ function DraggableProductPageCard({
            * niat scroll, bukan reorder.
            */
           if (
-            Math.abs(dx) > 8 ||
-            Math.abs(dy) > 8
+            Math.abs(dx) > 14 ||
+            Math.abs(dy) > 14
           ) {
             clearDragTimer();
           }
@@ -721,58 +773,97 @@ export default function UploadProductScreen({
             ".pdf"
           );
 
-        for (
-          const row of
+        /*
+         * EDIT_IMAGE_PREVIEW_BATCH_V1
+         * Semua signed URL halaman dibuat
+         * dalam satu request Storage.
+         */
+        const imagePageRows =
+          (
             shouldLoadImagePages
               ? pageRows ?? []
               : []
-        ) {
-          const storagePath =
-            String(
-              row.storage_path ?? ""
-            ).trim();
+          ).filter(row =>
+            Boolean(
+              String(
+                row.storage_path ?? ""
+              ).trim()
+            )
+          );
 
-          if (!storagePath) {
-            continue;
-          }
+        if (
+          imagePageRows.length > 0
+        ) {
+          const storagePaths =
+            imagePageRows.map(row =>
+              String(
+                row.storage_path ?? ""
+              ).trim()
+            );
 
           const {
-            data: signed,
-            error: signedError,
-          } = await supabase.storage
-            .from(
-              "store-product-files"
-            )
-            .createSignedUrl(
-              storagePath,
-              3600
-            );
+            data: signedRows,
+            error: signedRowsError,
+          } =
+            await supabase.storage
+              .from(
+                "store-product-files"
+              )
+              .createSignedUrls(
+                storagePaths,
+                3600
+              );
+
+          if (signedRowsError) {
+            throw signedRowsError;
+          }
 
           if (
-            signedError ||
-            !signed?.signedUrl
+            !signedRows ||
+            signedRows.length !==
+              imagePageRows.length
           ) {
-            throw (
-              signedError ??
-              new Error(
-                "Preview halaman produk tidak dapat disiapkan."
-              )
+            throw new Error(
+              "Preview halaman produk tidak lengkap."
             );
           }
 
-          loadedPages.push({
-            uri: signed.signedUrl,
+          for (
+            let index = 0;
+            index <
+              imagePageRows.length;
+            index++
+          ) {
+            const row =
+              imagePageRows[index];
 
-            fileName:
-              row.original_name ??
-              `Halaman ${row.page_number}`,
+            const storagePath =
+              storagePaths[index];
 
-            mimeType:
-              row.mime_type ??
-              "image/jpeg",
+            const signedUrl =
+              signedRows[index]
+                ?.signedUrl;
 
-            storagePath,
-          });
+            if (!signedUrl) {
+              throw new Error(
+                "Preview halaman produk tidak dapat disiapkan."
+              );
+            }
+
+            loadedPages.push({
+              uri: signedUrl,
+
+              fileName:
+                row.original_name ??
+                `Halaman ${row.page_number}`,
+
+              mimeType:
+                row.mime_type ??
+                "image/jpeg",
+
+              storagePath,
+            });
+          }
         }
 
         if (!active) {
