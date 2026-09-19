@@ -22,6 +22,75 @@ export type StorePrivateMediaBucket =
   | typeof STORE_MEDIA_BUCKETS.productOriginals
   | typeof STORE_MEDIA_BUCKETS.chatFiles;
 
+export type StoreImageMimeType =
+  | "image/jpeg"
+  | "image/png"
+  | "image/webp";
+
+export function normalizeStoreImageMimeType(
+  value: string | null | undefined
+): StoreImageMimeType {
+  const mime =
+    String(value ?? "")
+      .trim()
+      .toLowerCase();
+
+  if (
+    !mime ||
+    mime === "image/jpg" ||
+    mime === "image/pjpeg"
+  ) {
+    return "image/jpeg";
+  }
+
+  if (mime === "image/x-png") {
+    return "image/png";
+  }
+
+  if (
+    mime === "image/jpeg" ||
+    mime === "image/png" ||
+    mime === "image/webp"
+  ) {
+    return mime;
+  }
+
+  throw new Error(
+    "Format gambar harus JPG, PNG, atau WEBP."
+  );
+}
+
+export function getStoreImageExtension(
+  mimeType: StoreImageMimeType
+) {
+  if (mimeType === "image/png") {
+    return "png";
+  }
+
+  if (mimeType === "image/webp") {
+    return "webp";
+  }
+
+  return "jpg";
+}
+
+function normalizeStoreMediaDimension(
+  value: number | null | undefined
+) {
+  if (
+    value == null ||
+    !Number.isFinite(value) ||
+    value <= 0
+  ) {
+    return null;
+  }
+
+  return Math.max(
+    1,
+    Math.trunc(value)
+  );
+}
+
 export type StoreMediaKind =
   | "image"
   | "pdf"
@@ -305,6 +374,8 @@ export type RegisterStoreProductMediaAssetInput = {
   variant: StoreMediaVariant;
   mimeType: string;
   sizeBytes?: number | null;
+  width?: number | null;
+  height?: number | null;
   visibility: StoreMediaVisibility;
   role: StoreProductMediaRole;
   sortOrder?: number;
@@ -342,6 +413,14 @@ export async function registerStoreProductMediaAsset(
                 input.sizeBytes
               )
             ),
+      width:
+        normalizeStoreMediaDimension(
+          input.width
+        ),
+      height:
+        normalizeStoreMediaDimension(
+          input.height
+        ),
       status:
         "ready",
       visibility:
@@ -492,6 +571,14 @@ export async function stageStoreProductMediaReplacement(
                 input.sizeBytes
               )
             ),
+      width:
+        normalizeStoreMediaDimension(
+          input.width
+        ),
+      height:
+        normalizeStoreMediaDimension(
+          input.height
+        ),
       status:
         "ready",
       visibility:

@@ -33,6 +33,8 @@ import {
   STORE_MEDIA_BUCKETS,
   STORE_MEDIA_UPLOAD_LIMITS,
   assertStoreMediaUploadSize,
+  normalizeStoreImageMimeType,
+  getStoreImageExtension,
   type StoreMediaUploadSizeLimitKey,
   buildStoreProductFilePath,
   buildStoreProductOriginalPath,
@@ -58,6 +60,8 @@ type PickedAsset = {
   fileName?: string | null;
   mimeType?: string | null;
   sizeBytes?: number | null;
+  width?: number | null;
+  height?: number | null;
 
   // EDIT_EXISTING_PAGE:
   // Jika terisi, halaman ini sudah ada di Storage.
@@ -596,6 +600,25 @@ function getExtension(
   return extension || fallback;
 }
 
+function getPickedAssetDimension(
+  value: unknown
+): number | null {
+  const parsed =
+    Number(value);
+
+  if (
+    !Number.isFinite(parsed) ||
+    parsed <= 0
+  ) {
+    return null;
+  }
+
+  return Math.max(
+    1,
+    Math.trunc(parsed)
+  );
+}
+
 function getPickedAssetSizeBytes(
   value: unknown
 ): number | null {
@@ -1087,16 +1110,32 @@ export default function UploadProductScreen({
         return;
       }
 
+      const mimeType =
+        normalizeStoreImageMimeType(
+          image.mime
+        );
+
+      const extension =
+        getStoreImageExtension(
+          mimeType
+        );
+
       setThumbnail({
         uri: image.path,
         fileName:
-          `thumbnail-${Date.now()}.jpg`,
-        mimeType:
-          image.mime ??
-          "image/jpeg",
+          `thumbnail-${Date.now()}.${extension}`,
+        mimeType,
         sizeBytes:
           getPickedAssetSizeBytes(
             image.size
+          ),
+        width:
+          getPickedAssetDimension(
+            image.width
+          ),
+        height:
+          getPickedAssetDimension(
+            image.height
           ),
       });
     } catch (error) {
@@ -1354,6 +1393,10 @@ export default function UploadProductScreen({
               "image/jpeg",
             sizeBytes:
               buffer.byteLength,
+            width:
+              page.width ?? null,
+            height:
+              page.height ?? null,
             visibility:
               "private",
             role:
@@ -1565,6 +1608,8 @@ export default function UploadProductScreen({
       mime_type: string;
       original_name: string | null;
       size_bytes: number | null;
+      width: number | null;
+      height: number | null;
     }> = [];
 
     let rpcCommitted = false;
@@ -1676,6 +1721,10 @@ export default function UploadProductScreen({
             null,
           size_bytes:
             sizeBytes,
+          width:
+            page.width ?? null,
+          height:
+            page.height ?? null,
         });
       }
 
@@ -1888,17 +1937,14 @@ export default function UploadProductScreen({
                 index
               ) => {
                 const mimeType =
-                  image.mime ??
-                  "image/jpeg";
+                  normalizeStoreImageMimeType(
+                    image.mime
+                  );
 
                 const extension =
-                  mimeType ===
-                    "image/png"
-                    ? "png"
-                    : mimeType ===
-                        "image/webp"
-                      ? "webp"
-                      : "jpg";
+                  getStoreImageExtension(
+                    mimeType
+                  );
 
                 return {
                   uri:
@@ -1911,6 +1957,14 @@ export default function UploadProductScreen({
                   sizeBytes:
                     getPickedAssetSizeBytes(
                       image.size
+                    ),
+                  width:
+                    getPickedAssetDimension(
+                      image.width
+                    ),
+                  height:
+                    getPickedAssetDimension(
+                      image.height
                     ),
                 };
               }
@@ -2644,6 +2698,10 @@ export default function UploadProductScreen({
                 "image/jpeg",
               sizeBytes:
                 thumbnailBuffer.byteLength,
+              width:
+                thumbnail.width ?? null,
+              height:
+                thumbnail.height ?? null,
               visibility:
                 "public_preview",
               role:
@@ -2846,6 +2904,10 @@ export default function UploadProductScreen({
                   "application/octet-stream",
                 sizeBytes:
                   fileBuffer.byteLength,
+                width:
+                  productFile.width ?? null,
+                height:
+                  productFile.height ?? null,
                 visibility:
                   "private",
                 role:
@@ -3493,6 +3555,10 @@ export default function UploadProductScreen({
               "image/jpeg",
             sizeBytes:
               thumbnailBuffer.byteLength,
+            width:
+              thumbnail.width ?? null,
+            height:
+              thumbnail.height ?? null,
             visibility:
               "public_preview",
             role:
@@ -3675,6 +3741,10 @@ export default function UploadProductScreen({
               "application/octet-stream",
             sizeBytes:
               fileBuffer.byteLength,
+            width:
+              productFile.width ?? null,
+            height:
+              productFile.height ?? null,
             visibility:
               "private",
             role:
