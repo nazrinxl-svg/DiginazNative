@@ -107,6 +107,20 @@ export function createStoreProductPreviewSession() {
     return entry.pending;
   }
 
+  function invalidate(
+    productId: string,
+    path: string
+  ) {
+    entries.delete(
+      key(productId, path)
+    );
+
+    logA4(
+      "URL_INVALIDATE",
+      productId
+    );
+  }
+
   async function warm(productId: string, path: string) {
     const url = await getUrl(productId, path);
     if (!url) return;
@@ -132,7 +146,12 @@ export function createStoreProductPreviewSession() {
     return entry.warm;
   }
 
-  return { peek, getUrl, warm };
+  return {
+    peek,
+    getUrl,
+    invalidate,
+    warm,
+  };
 }
 
 export type StoreProductPreviewSession =

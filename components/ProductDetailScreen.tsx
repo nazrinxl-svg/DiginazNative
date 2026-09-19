@@ -178,6 +178,14 @@ export default function ProductDetailScreen({
   const imageStartedRef = useRef(new Map<string, number>());
   const sourceUrlsRef = useRef<Array<string | null>>([]);
 
+  const imageLoadTimeoutsRef =
+    useRef(
+      new Map<
+        number,
+        ReturnType<typeof setTimeout>
+      >()
+    );
+
   // MULTIPAGE_IMAGE_DOWNLOAD_V1
   // URL signed untuk viewer tetap terpisah dari storage_path download.
   const productPageRowsRef =
@@ -185,11 +193,170 @@ export default function ProductDetailScreen({
   const [firstImageSettledUrl, setFirstImageSettledUrl] = useState<string | null>(null);
   const [productPageUrls, setProductPageUrls] = useState<Array<string | null>>(() => {
     const cached = pagePreview.peek(product.id, product.firstPageStoragePath);
-    return cached ? [cached] : [];
+
+    if (cached) {
+      return [cached];
+    }
+
+    return product.firstPageStoragePath
+      ? [null]
+      : [];
   });
+
+  const [
+    failedProductImagePages,
+    setFailedProductImagePages,
+  ] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  const [
+    retryingProductImagePages,
+    setRetryingProductImagePages,
+  ] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  const [
+    loadingProductImagePages,
+    setLoadingProductImagePages,
+  ] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  useEffect(() => {
+    setLoadingProductImagePages(
+      new Set()
+    );
+  }, [product.id]);
+
+  function clearProductImageLoadTimeout(
+    index: number
+  ) {
+    const timeout =
+      imageLoadTimeoutsRef.current.get(
+        index
+      );
+
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+
+      imageLoadTimeoutsRef.current.delete(
+        index
+      );
+    }
+
+    setLoadingProductImagePages(
+      current => {
+        if (!current.has(index)) {
+          return current;
+        }
+
+        const next =
+          new Set(current);
+
+        next.delete(index);
+
+        return next;
+      }
+    );
+  }
+
+  function armProductImageLoadTimeout(
+    index: number
+  ) {
+    clearProductImageLoadTimeout(
+      index
+    );
+
+    setLoadingProductImagePages(
+      current => {
+        const next =
+          new Set(current);
+
+        next.add(index);
+
+        return next;
+      }
+    );
+
+    const timeout =
+      setTimeout(
+        () => {
+          imageLoadTimeoutsRef.current.delete(
+            index
+          );
+
+          setLoadingProductImagePages(
+            current => {
+              const next =
+                new Set(current);
+
+              next.delete(index);
+
+              return next;
+            }
+          );
+
+          setRetryingProductImagePages(
+            current => {
+              const next =
+                new Set(current);
+
+              next.delete(index);
+
+              return next;
+            }
+          );
+
+          setFailedProductImagePages(
+            current => {
+              const next =
+                new Set(current);
+
+              next.add(index);
+
+              return next;
+            }
+          );
+
+          logA4(
+            "IMAGE_TIMEOUT",
+            product.id,
+            {
+              page: index + 1,
+            }
+          );
+        },
+        6000
+      );
+
+    imageLoadTimeoutsRef.current.set(
+      index,
+      timeout
+    );
+  }
 
   useEffect(() => {
     logA4("DETAIL_MOUNT", product.id);
+
+    setFailedProductImagePages(
+      new Set()
+    );
+
+    setRetryingProductImagePages(
+      new Set()
+    );
+
+    return () => {
+      imageLoadTimeoutsRef.current.forEach(
+        timeout => {
+          clearTimeout(timeout);
+        }
+      );
+
+      imageLoadTimeoutsRef.current.clear();
+    };
   }, [product.id]);
 
   useEffect(() => {
@@ -198,7 +365,34 @@ export default function ProductDetailScreen({
     if (path) {
       // Join an in-flight Store sign, or reuse its URL. No page-1 DB query.
       void pagePreview.getUrl(product.id, path).then(url => {
-        if (!active || !url) return;
+        if (!active) return;
+
+        if (!url) {
+          setFailedProductImagePages(
+            current => {
+              const next =
+                new Set(current);
+
+              next.add(0);
+
+              return next;
+            }
+          );
+
+          return;
+        }
+
+        setFailedProductImagePages(
+          current => {
+            const next =
+              new Set(current);
+
+            next.delete(0);
+
+            return next;
+          }
+        );
+
         setProductPageUrls(current => current[0] === url
           ? current : [url, ...current.slice(1)]);
       });
@@ -218,6 +412,94 @@ export default function ProductDetailScreen({
     });
     sourceUrlsRef.current = productPageUrls;
   }, [product.id, productPageUrls]);
+
+  async function retryProductImagePage(
+    index: number
+  ) {
+    const row =
+      productPageRowsRef.current[
+        index
+      ];
+
+    const storagePath =
+      row?.storage_path?.trim() ||
+      (
+        index === 0
+          ? product.firstPageStoragePath
+              ?.trim()
+          : ""
+      ) ||
+      "";
+
+    if (!storagePath) {
+      return;
+    }
+
+    setRetryingProductImagePages(
+      current => {
+        const next =
+          new Set(current);
+
+        next.add(index);
+
+        return next;
+      }
+    );
+
+    pagePreview.invalidate(
+      product.id,
+      storagePath
+    );
+
+    const nextUrl =
+      await pagePreview.getUrl(
+        product.id,
+        storagePath,
+        row?.page_number ??
+          index + 1
+      );
+
+    if (!nextUrl) {
+      setRetryingProductImagePages(
+        current => {
+          const next =
+            new Set(current);
+
+          next.delete(index);
+
+          return next;
+        }
+      );
+
+      return;
+    }
+
+    setProductPageUrls(
+      current => {
+        const next =
+          [...current];
+
+        next[index] =
+          nextUrl;
+
+        return next;
+      }
+    );
+
+    if (index === 0) {
+      setFirstImageSettledUrl(
+        null
+      );
+    }
+
+    logA4(
+      "IMAGE_RETRY_URL_READY",
+      product.id,
+      {
+        page: index + 1,
+      }
+    );
+  }
 
   const [
     activeProductSlide,
@@ -641,7 +923,33 @@ export default function ProductDetailScreen({
             const firstPageUrl = await pagePreview.getUrl(
               product.id, pages[0].storage_path, pages[0].page_number
             );
+
             if (!active) return;
+
+            if (!firstPageUrl) {
+              setFailedProductImagePages(
+                current => {
+                  const next =
+                    new Set(current);
+
+                  next.add(0);
+
+                  return next;
+                }
+              );
+            } else {
+              setFailedProductImagePages(
+                current => {
+                  const next =
+                    new Set(current);
+
+                  next.delete(0);
+
+                  return next;
+                }
+              );
+            }
+
             setProductPageUrls(current => [
               firstPageUrl ?? current[0] ?? null,
               ...pages.slice(1).map(() => null),
@@ -652,7 +960,39 @@ export default function ProductDetailScreen({
               const url = await pagePreview.getUrl(
                 product.id, page.storage_path, page.page_number
               );
-              if (!active || !url) return;
+
+              if (!active) return;
+
+              if (!url) {
+                setFailedProductImagePages(
+                  current => {
+                    const next =
+                      new Set(current);
+
+                    next.add(
+                      index + 1
+                    );
+
+                    return next;
+                  }
+                );
+
+                return;
+              }
+
+              setFailedProductImagePages(
+                current => {
+                  const next =
+                    new Set(current);
+
+                  next.delete(
+                    index + 1
+                  );
+
+                  return next;
+                }
+              );
+
               setProductPageUrls(current => {
                 const next = [...current];
                 next[index + 1] = url;
@@ -3045,12 +3385,32 @@ export default function ProductDetailScreen({
         .endsWith(".pdf")
     );
 
+  const imageSlideCount =
+    Math.max(
+      Number(
+        product.pageCount ?? 0
+      ),
+      productPageUrls.length,
+      product.firstPageStoragePath
+        ? 1
+        : 0
+    );
+
   const productSlides =
     previewUiReady
       ? (
           isPdfProduct
             ? pdfPageUrls
-            : productPageUrls
+            : Array.from(
+                {
+                  length:
+                    imageSlideCount,
+                },
+                (_, index) =>
+                  productPageUrls[
+                    index
+                  ] ?? null
+              )
         )
       : [];
 
@@ -3613,6 +3973,10 @@ export default function ProductDetailScreen({
                               Date.now()
                             );
 
+                            armProductImageLoadTimeout(
+                              index
+                            );
+
                             logA4(
                               "IMAGE_START",
                               product.id,
@@ -3622,6 +3986,10 @@ export default function ProductDetailScreen({
                             );
                           }}
                           onLoad={() => {
+                            clearProductImageLoadTimeout(
+                              index
+                            );
+
                             const started =
                               imageStartedRef.current.get(
                                 imageUrl
@@ -3643,6 +4011,78 @@ export default function ProductDetailScreen({
                               }
                             );
 
+                            setFailedProductImagePages(
+                              current => {
+                                const next =
+                                  new Set(current);
+
+                                next.delete(
+                                  index
+                                );
+
+                                return next;
+                              }
+                            );
+
+                            setRetryingProductImagePages(
+                              current => {
+                                const next =
+                                  new Set(current);
+
+                                next.delete(
+                                  index
+                                );
+
+                                return next;
+                              }
+                            );
+
+                            if (index === 0) {
+                              setFirstImageSettledUrl(
+                                imageUrl
+                              );
+                            }
+                          }}
+                          onError={() => {
+                            clearProductImageLoadTimeout(
+                              index
+                            );
+
+                            setFailedProductImagePages(
+                              current => {
+                                const next =
+                                  new Set(current);
+
+                                next.add(
+                                  index
+                                );
+
+                                return next;
+                              }
+                            );
+
+                            setRetryingProductImagePages(
+                              current => {
+                                const next =
+                                  new Set(current);
+
+                                next.delete(
+                                  index
+                                );
+
+                                return next;
+                              }
+                            );
+
+                            logA4(
+                              "IMAGE_ERROR",
+                              product.id,
+                              {
+                                page:
+                                  index + 1,
+                              }
+                            );
+
                             if (index === 0) {
                               setFirstImageSettledUrl(
                                 imageUrl
@@ -3650,6 +4090,88 @@ export default function ProductDetailScreen({
                             }
                           }}
                         />
+                      ) : null}
+
+                      {!failedProductImagePages.has(
+                        index
+                      ) &&
+                      (
+                        !imageUrl ||
+                        loadingProductImagePages.has(
+                          index
+                        )
+                      ) ? (
+                        <View
+                          pointerEvents="none"
+                          style={
+                            styles.productImageLoading
+                          }
+                        >
+                          <ActivityIndicator
+                            size="small"
+                            color="#2563EB"
+                          />
+
+                          <Text
+                            style={
+                              styles.productImageLoadingText
+                            }
+                          >
+                            Memuat gambar...
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {failedProductImagePages.has(
+                        index
+                      ) ? (
+                        <View
+                          pointerEvents="box-none"
+                          style={
+                            styles.productImageError
+                          }
+                        >
+                          <Text
+                            style={
+                              styles.productImageErrorText
+                            }
+                          >
+                            Gambar gagal dimuat
+                          </Text>
+
+                          <Pressable
+                            style={
+                              styles.productImageRetryButton
+                            }
+                            onPress={() =>
+                              void retryProductImagePage(
+                                index
+                              )
+                            }
+                            disabled={
+                              retryingProductImagePages.has(
+                                index
+                              )
+                            }
+                          >
+                            {retryingProductImagePages.has(
+                              index
+                            ) ? (
+                              <ActivityIndicator
+                                size="small"
+                                color="#2563EB"
+                              />
+                            ) : (
+                              <Text
+                                style={
+                                  styles.productImageRetryText
+                                }
+                              >
+                                Coba lagi
+                              </Text>
+                            )}
+                          </Pressable>
+                        </View>
                       ) : null}
                     </View>
                   ))
@@ -4739,6 +5261,53 @@ const styles = StyleSheet.create({
   thumbnailImage: {
     width: "100%",
     height: "100%",
+  },
+
+  productImageLoading: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: "#FFFFFF",
+  },
+
+  productImageLoadingText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 12,
+    color: "#64748B",
+  },
+
+  productImageError: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: "#EFF6FF",
+  },
+
+  productImageErrorText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 12,
+    color: "#475569",
+  },
+
+  productImageRetryButton: {
+    minWidth: 92,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  productImageRetryText: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 11,
+    color: "#2563EB",
   },
 
   typeBadge: {
