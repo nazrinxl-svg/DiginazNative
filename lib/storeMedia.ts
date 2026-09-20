@@ -91,6 +91,23 @@ function normalizeStoreMediaDimension(
   );
 }
 
+function normalizeStoreMediaPageCount(
+  value: number | null | undefined
+) {
+  if (
+    value == null ||
+    !Number.isFinite(value) ||
+    value <= 0
+  ) {
+    return null;
+  }
+
+  return Math.max(
+    1,
+    Math.trunc(value)
+  );
+}
+
 export type StoreMediaKind =
   | "image"
   | "pdf"
@@ -376,6 +393,7 @@ export type RegisterStoreProductMediaAssetInput = {
   sizeBytes?: number | null;
   width?: number | null;
   height?: number | null;
+  pageCount?: number | null;
   visibility: StoreMediaVisibility;
   role: StoreProductMediaRole;
   sortOrder?: number;
@@ -420,6 +438,10 @@ export async function registerStoreProductMediaAsset(
       height:
         normalizeStoreMediaDimension(
           input.height
+        ),
+      page_count:
+        normalizeStoreMediaPageCount(
+          input.pageCount
         ),
       status:
         "ready",
@@ -578,6 +600,10 @@ export async function stageStoreProductMediaReplacement(
       height:
         normalizeStoreMediaDimension(
           input.height
+        ),
+      page_count:
+        normalizeStoreMediaPageCount(
+          input.pageCount
         ),
       status:
         "ready",

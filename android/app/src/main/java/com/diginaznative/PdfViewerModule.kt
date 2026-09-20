@@ -26,13 +26,37 @@ class PdfViewerModule(
     promise: Promise
   ) {
     try {
-      val file = resolveFile(localPath)
+      val cleanPath =
+        localPath.trim()
 
       val descriptor =
-        ParcelFileDescriptor.open(
-          file,
-          ParcelFileDescriptor.MODE_READ_ONLY
-        )
+        if (
+          cleanPath.startsWith(
+            "content://"
+          )
+        ) {
+          reactContext
+            .contentResolver
+            .openFileDescriptor(
+              Uri.parse(
+                cleanPath
+              ),
+              "r"
+            )
+            ?: throw IllegalArgumentException(
+              "URI PDF tidak dapat dibuka."
+            )
+        } else {
+          val file =
+            resolveFile(
+              cleanPath
+            )
+
+          ParcelFileDescriptor.open(
+            file,
+            ParcelFileDescriptor.MODE_READ_ONLY
+          )
+        }
 
       val renderer =
         PdfRenderer(descriptor)

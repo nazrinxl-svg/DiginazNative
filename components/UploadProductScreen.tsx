@@ -27,6 +27,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import ImageCropPicker from "react-native-image-crop-picker";
 import { ImagePickerCompat as ImagePicker } from "../lib/nativePickers";
 import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
+import { pdfViewer } from "../lib/pdfViewer";
 
 import { supabase } from "../lib/supabase";
 import {
@@ -62,6 +63,7 @@ type PickedAsset = {
   sizeBytes?: number | null;
   width?: number | null;
   height?: number | null;
+  pageCount?: number | null;
 
   // EDIT_EXISTING_PAGE:
   // Jika terisi, halaman ini sudah ada di Storage.
@@ -633,6 +635,35 @@ function getPickedAssetSizeBytes(
   }
 
   return Math.trunc(parsed);
+}
+
+async function getPickedPdfPageCount(
+  uri: string
+): Promise<number | null> {
+  if (
+    Platform.OS !== "android" ||
+    !pdfViewer.available
+  ) {
+    return null;
+  }
+
+  try {
+    const pageCount =
+      await pdfViewer.getPageCount(
+        uri
+      );
+
+    return getPickedAssetDimension(
+      pageCount
+    );
+  } catch (error) {
+    console.warn(
+      "Baca page_count PDF gagal:",
+      error
+    );
+
+    return null;
+  }
 }
 
 async function fetchStoreUploadBuffer(
@@ -2120,6 +2151,13 @@ export default function UploadProductScreen({
     }
 
 
+    const pdfPageCount =
+      productFileKind === "pdf"
+        ? await getPickedPdfPageCount(
+            asset.uri
+          )
+        : null;
+
     setProductFile({
       uri:
         asset.uri,
@@ -2137,6 +2175,8 @@ export default function UploadProductScreen({
         getPickedAssetSizeBytes(
           asset.size
         ),
+      pageCount:
+        pdfPageCount,
     });
   }
 
@@ -2192,6 +2232,11 @@ export default function UploadProductScreen({
         return;
       }
 
+      const previewPageCount =
+        await getPickedPdfPageCount(
+          asset.uri
+        );
+
       setPreviewPdfFile({
         uri:
           asset.uri,
@@ -2207,6 +2252,8 @@ export default function UploadProductScreen({
           getPickedAssetSizeBytes(
             asset.size
           ),
+        pageCount:
+          previewPageCount,
       });
     }
     catch (error) {
@@ -2819,6 +2866,9 @@ export default function UploadProductScreen({
                   "application/pdf",
                 sizeBytes:
                   converted.previewSizeBytes,
+                pageCount:
+                  previewPdfFile.pageCount ??
+                  null,
                 visibility:
                   "private",
                 role:
@@ -2908,6 +2958,11 @@ export default function UploadProductScreen({
                   productFile.width ?? null,
                 height:
                   productFile.height ?? null,
+                pageCount:
+                  productFileKind === "pdf"
+                    ? productFile.pageCount ??
+                      null
+                    : null,
                 visibility:
                   "private",
                 role:
@@ -3660,6 +3715,9 @@ export default function UploadProductScreen({
               "application/pdf",
             sizeBytes:
               converted.previewSizeBytes,
+            pageCount:
+              previewPdfFile.pageCount ??
+              null,
             visibility:
               "private",
             role:
@@ -3745,6 +3803,11 @@ export default function UploadProductScreen({
               productFile.width ?? null,
             height:
               productFile.height ?? null,
+            pageCount:
+              productFileKind === "pdf"
+                ? productFile.pageCount ??
+                  null
+                : null,
             visibility:
               "private",
             role:
