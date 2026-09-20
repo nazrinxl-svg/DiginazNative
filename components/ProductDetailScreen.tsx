@@ -1519,6 +1519,12 @@ export default function ProductDetailScreen({
         let cachedPageCount:
           number | null = null;
 
+        const cacheLookupStartedAt =
+          Date.now();
+
+        let cacheLookupReason =
+          "viewer_cache_file_missing";
+
         try {
           const cacheExists =
             await ReactNativeBlobUtil.fs
@@ -1552,20 +1558,64 @@ export default function ProductDetailScreen({
 
                   cachedPageCount =
                     pageCount;
+
+                  cacheLookupReason =
+                    "valid_viewer_cache";
+                } else {
+                  cacheLookupReason =
+                    "invalid_page_count";
                 }
               } catch (
                 cacheValidationError
               ) {
+                cacheLookupReason =
+                  "invalid_viewer_cache";
+
                 console.warn(
                   "Cache PDF rusak, unduh ulang:",
                   cacheValidationError
                 );
               }
+            } else {
+              cacheLookupReason =
+                "empty_viewer_cache";
             }
           }
         } catch {
           cachedPdfReady = false;
+
+          cacheLookupReason =
+            "viewer_cache_lookup_error";
         }
+
+        void trackMediaObservabilityEvent({
+          eventType:
+            cachedPdfReady
+              ? "cache_hit"
+              : "cache_miss",
+          mediaScope:
+            "store_product",
+          productId:
+            product.id,
+          bucket:
+            STORE_MEDIA_BUCKETS.productFiles,
+          storagePath,
+          bytesTransferred: 0,
+          latencyMs:
+            Math.max(
+              Date.now() -
+                cacheLookupStartedAt,
+              0
+            ),
+          source:
+            "product_detail",
+          metadata: {
+            cache_kind:
+              "pdf_viewer_original_cache",
+            reason:
+              cacheLookupReason,
+          },
+        });
 
         if (!cachedPdfReady) {
           await deleteStorePdfCacheFileIfExists(
