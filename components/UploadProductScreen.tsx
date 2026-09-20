@@ -28,6 +28,7 @@ import ImageCropPicker from "react-native-image-crop-picker";
 import { ImagePickerCompat as ImagePicker } from "../lib/nativePickers";
 import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 import { pdfViewer } from "../lib/pdfViewer";
+import ReactNativeBlobUtil from "react-native-blob-util";
 
 import { supabase } from "../lib/supabase";
 import {
@@ -695,6 +696,171 @@ async function fetchStoreUploadBuffer(
   );
 
   return buffer;
+}
+
+function normalizeStoreDocumentUploadPath(
+  uri: string
+) {
+  const clean =
+    uri.trim();
+
+  const withoutScheme =
+    clean.startsWith("file://")
+      ? clean.slice(
+          "file://".length
+        )
+      : clean;
+
+  try {
+    return decodeURIComponent(
+      withoutScheme
+    );
+  } catch {
+    return withoutScheme;
+  }
+}
+
+async function uploadStoreDocumentNative(
+  bucket: string,
+  storagePath: string,
+  asset: PickedAsset,
+  limitKey: StoreMediaUploadSizeLimitKey,
+  label: string,
+  contentType: string
+): Promise<number> {
+  if (
+    asset.sizeBytes != null
+  ) {
+    assertStoreMediaUploadSize(
+      asset.sizeBytes,
+      limitKey,
+      label
+    );
+  }
+
+  const localPath =
+    normalizeStoreDocumentUploadPath(
+      asset.uri
+    );
+
+  if (
+    !localPath ||
+    localPath.startsWith(
+      "content://"
+    )
+  ) {
+    throw new Error(
+      `${label} belum tersedia sebagai file lokal untuk upload.`
+    );
+  }
+
+  const stat =
+    await ReactNativeBlobUtil
+      .fs
+      .stat(
+        localPath
+      );
+
+  const sizeBytes =
+    Number(
+      stat.size ?? 0
+    );
+
+  if (
+    !Number.isFinite(
+      sizeBytes
+    ) ||
+    sizeBytes <= 0
+  ) {
+    throw new Error(
+      `${label} kosong atau tidak dapat dibaca.`
+    );
+  }
+
+  assertStoreMediaUploadSize(
+    sizeBytes,
+    limitKey,
+    label
+  );
+
+  const {
+    data,
+    error,
+  } =
+    await supabase.storage
+      .from(
+        bucket
+      )
+      .createSignedUploadUrl(
+        storagePath,
+        {
+          upsert: false,
+        }
+      );
+
+  if (error) {
+    throw error;
+  }
+
+  if (
+    !data?.signedUrl
+  ) {
+    throw new Error(
+      `URL upload ${label} belum tersedia.`
+    );
+  }
+
+  const response =
+    await ReactNativeBlobUtil
+      .fetch(
+        "PUT",
+        data.signedUrl,
+        {
+          "Content-Type":
+            contentType,
+          "Cache-Control":
+            "max-age=3600",
+          "x-upsert":
+            "false",
+        },
+        ReactNativeBlobUtil.wrap(
+          localPath
+        )
+      );
+
+  const status =
+    Number(
+      response.info().status
+    );
+
+  if (
+    !Number.isFinite(
+      status
+    ) ||
+    status < 200 ||
+    status >= 300
+  ) {
+    let responseText = "";
+
+    try {
+      responseText =
+        String(
+          await response.text()
+        ).trim();
+    } catch {
+      responseText = "";
+    }
+
+    throw new Error(
+      responseText
+        ? `Upload ${label} gagal (${status}): ${responseText}`
+        : `Upload ${label} gagal (${status}).`
+    );
+  }
+
+  return Math.trunc(
+    sizeBytes
+  );
 }
 
 export default function UploadProductScreen({
@@ -2357,59 +2523,19 @@ export default function UploadProductScreen({
         : "application/msword";
 
 
-    const wordBuffer =
-      await fetchStoreUploadBuffer(wordAsset, "productOriginalBytes", "File Word");
-
-    if (
-      wordBuffer.byteLength <= 0
-    ) {
-      throw new Error(
-        "File Word kosong atau tidak dapat dibaca."
-      );
-    }
-
-
-    const previewBuffer =
-      await fetchStoreUploadBuffer(previewAsset, "productFileBytes", "PDF pratinjau");
-
-    if (
-      previewBuffer.byteLength <= 0
-    ) {
-      throw new Error(
-        "PDF pratinjau kosong atau tidak dapat dibaca."
-      );
-    }
-
-
     let originalUploaded =
       false;
 
     try {
-      const {
-        error:
-          originalUploadError,
-      } =
-        await supabase.storage
-          .from(
-            STORE_MEDIA_BUCKETS.productOriginals
-          )
-          .upload(
-            originalPath,
-            wordBuffer,
-            {
-              contentType:
-                originalMimeType,
-
-              upsert:
-                false,
-            }
-          );
-
-      if (
-        originalUploadError
-      ) {
-        throw originalUploadError;
-      }
+      const originalSizeBytes =
+        await uploadStoreDocumentNative(
+          STORE_MEDIA_BUCKETS.productOriginals,
+          originalPath,
+          wordAsset,
+          "productOriginalBytes",
+          "File Word",
+          originalMimeType
+        );
 
       originalUploaded =
         true;
@@ -2417,31 +2543,15 @@ export default function UploadProductScreen({
       updateUploadProgress(45);
 
 
-      const {
-        error:
-          previewUploadError,
-      } =
-        await supabase.storage
-          .from(
-            STORE_MEDIA_BUCKETS.productFiles
-          )
-          .upload(
-            pdfPath,
-            previewBuffer,
-            {
-              contentType:
-                "application/pdf",
-
-              upsert:
-                false,
-            }
-          );
-
-      if (
-        previewUploadError
-      ) {
-        throw previewUploadError;
-      }
+      const previewSizeBytes =
+        await uploadStoreDocumentNative(
+          STORE_MEDIA_BUCKETS.productFiles,
+          pdfPath,
+          previewAsset,
+          "productFileBytes",
+          "PDF pratinjau",
+          "application/pdf"
+        );
 
       updateUploadProgress(80);
 
@@ -2451,10 +2561,8 @@ export default function UploadProductScreen({
         originalPath,
         originalFileName,
         originalMimeType,
-        originalSizeBytes:
-          wordBuffer.byteLength,
-        previewSizeBytes:
-          previewBuffer.byteLength,
+        originalSizeBytes,
+        previewSizeBytes,
       };
     }
     catch (error) {
@@ -2909,31 +3017,19 @@ export default function UploadProductScreen({
                 cleanFileName
               );
 
-            const fileBuffer =
-              await fetchStoreUploadBuffer(productFile, "productFileBytes", "File PDF");
+            const pdfMimeType =
+              productFile.mimeType ??
+              "application/pdf";
 
-            const {
-              error: fileError,
-            } =
-              await supabase.storage
-                .from(
-                  STORE_MEDIA_BUCKETS.productFiles
-                )
-                .upload(
-                  filePath,
-                  fileBuffer,
-                  {
-                    contentType:
-                      productFile.mimeType ??
-                      "application/octet-stream",
-                    upsert:
-                      false,
-                  }
-                );
-
-            if (fileError) {
-              throw fileError;
-            }
+            const fileSizeBytes =
+              await uploadStoreDocumentNative(
+                STORE_MEDIA_BUCKETS.productFiles,
+                filePath,
+                productFile,
+                "productFileBytes",
+                "File PDF",
+                pdfMimeType
+              );
 
             const stagedPdfChange =
               await stageStoreProductMediaReplacement({
@@ -2950,10 +3046,9 @@ export default function UploadProductScreen({
                 variant:
                   "original",
                 mimeType:
-                  productFile.mimeType ??
-                  "application/octet-stream",
+                  pdfMimeType,
                 sizeBytes:
-                  fileBuffer.byteLength,
+                  fileSizeBytes,
                 width:
                   productFile.width ?? null,
                 height:
@@ -3750,30 +3845,56 @@ export default function UploadProductScreen({
             cleanFileName
           );
 
-        const fileBuffer =
-          await fetchStoreUploadBuffer(productFile, "productFileBytes", productFileKind === "image" ? "Gambar produk" : "File PDF");
+        let primarySizeBytes:
+          number;
 
-        const {
-          error: fileError,
-        } =
-          await supabase.storage
-            .from(
-              STORE_MEDIA_BUCKETS.productFiles
-            )
-            .upload(
+        if (
+          productFileKind ===
+            "pdf"
+        ) {
+          primarySizeBytes =
+            await uploadStoreDocumentNative(
+              STORE_MEDIA_BUCKETS.productFiles,
               filePath,
-              fileBuffer,
-              {
-                contentType:
-                  productFile.mimeType ??
-                  "application/octet-stream",
-                upsert:
-                  false,
-              }
+              productFile,
+              "productFileBytes",
+              "File PDF",
+              productFile.mimeType ??
+                "application/pdf"
+            );
+        } else {
+          const fileBuffer =
+            await fetchStoreUploadBuffer(
+              productFile,
+              "productFileBytes",
+              "Gambar produk"
             );
 
-        if (fileError) {
-          throw fileError;
+          const {
+            error: fileError,
+          } =
+            await supabase.storage
+              .from(
+                STORE_MEDIA_BUCKETS.productFiles
+              )
+              .upload(
+                filePath,
+                fileBuffer,
+                {
+                  contentType:
+                    productFile.mimeType ??
+                    "application/octet-stream",
+                  upsert:
+                    false,
+                }
+              );
+
+          if (fileError) {
+            throw fileError;
+          }
+
+          primarySizeBytes =
+            fileBuffer.byteLength;
         }
 
         const primaryMediaAssetId =
@@ -3798,7 +3919,7 @@ export default function UploadProductScreen({
               productFile.mimeType ??
               "application/octet-stream",
             sizeBytes:
-              fileBuffer.byteLength,
+              primarySizeBytes,
             width:
               productFile.width ?? null,
             height:

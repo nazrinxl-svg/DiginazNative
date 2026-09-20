@@ -5,6 +5,7 @@
 
 import {
   pick,
+  keepLocalCopy,
   errorCodes,
   isErrorWithCode,
 } from "@react-native-documents/picker";
@@ -149,7 +150,69 @@ export const DocumentPickerCompat = {
           options.multiple === true,
       } as any);
 
-      const assets = result.map((file: any) => ({
+      let readableResult:
+        any[] =
+        result;
+
+      if (
+        options.copyToCacheDirectory ===
+          true &&
+        result.length > 0
+      ) {
+        const copies =
+          await keepLocalCopy({
+            files:
+              result.map(
+                (
+                  file: any,
+                  index: number
+                ) => ({
+                  uri:
+                    file.uri,
+                  fileName:
+                    file.name ??
+                    `dokumen-${Date.now()}-${index + 1}`,
+                })
+              ) as any,
+            destination:
+              "cachesDirectory",
+          });
+
+        readableResult =
+          result.map(
+            (
+              file: any,
+              index: number
+            ) => {
+              const copy =
+                copies[index];
+
+              if (!copy) {
+                throw new Error(
+                  "Salinan lokal dokumen tidak tersedia."
+                );
+              }
+
+              if (
+                copy.status ===
+                  "error"
+              ) {
+                throw new Error(
+                  copy.copyError ||
+                    "Dokumen gagal disalin ke cache aplikasi."
+                );
+              }
+
+              return {
+                ...file,
+                uri:
+                  copy.localUri,
+              };
+            }
+          );
+      }
+
+      const assets = readableResult.map((file: any) => ({
         uri: file.uri,
         name:
           file.name ??
