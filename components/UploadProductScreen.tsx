@@ -734,6 +734,68 @@ type StoreDocumentUploadTaskRef = {
     StoreDocumentUploadTask | null;
 };
 
+type StoreDocumentUploadCancelRef = {
+  current: boolean;
+};
+
+const STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS =
+  2;
+
+function getStoreDocumentUploadErrorStatus(
+  error: unknown
+): number | null {
+  if (
+    !error ||
+    typeof error !== "object"
+  ) {
+    return null;
+  }
+
+  const candidate =
+    (
+      error as {
+        statusCode?: unknown;
+        status?: unknown;
+      }
+    ).statusCode ??
+    (
+      error as {
+        status?: unknown;
+      }
+    ).status;
+
+  const status =
+    Number(candidate);
+
+  return Number.isFinite(status)
+    ? status
+    : null;
+}
+
+function isRetryableStoreDocumentUploadStatus(
+  status: number
+) {
+  return (
+    status === 408 ||
+    status === 429 ||
+    (
+      status >= 500 &&
+      status <= 599
+    )
+  );
+}
+
+function waitForStoreDocumentUploadRetry() {
+  return new Promise<void>(
+    resolve => {
+      setTimeout(
+        resolve,
+        450
+      );
+    }
+  );
+}
+
 async function uploadStoreDocumentNative(
   bucket: string,
   storagePath: string,
@@ -742,7 +804,9 @@ async function uploadStoreDocumentNative(
   label: string,
   contentType: string,
   uploadTaskRef:
-    StoreDocumentUploadTaskRef
+    StoreDocumentUploadTaskRef,
+  cancelRequestedRef:
+    StoreDocumentUploadCancelRef
 ): Promise<number> {
   if (
     asset.sizeBytes != null
@@ -799,101 +863,213 @@ async function uploadStoreDocumentNative(
     label
   );
 
-  const {
-    data,
-    error,
-  } =
-    await supabase.storage
-      .from(
-        bucket
-      )
-      .createSignedUploadUrl(
-        storagePath,
-        {
-          upsert: false,
-        }
-      );
+  let lastError: unknown =
+    null;
 
-  if (error) {
-    throw error;
-  }
-
-  if (
-    !data?.signedUrl
+  for (
+    let attempt = 1;
+    attempt <=
+      STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS;
+    attempt += 1
   ) {
-    throw new Error(
-      `URL upload ${label} belum tersedia.`
-    );
-  }
-
-  const uploadTask =
-    ReactNativeBlobUtil
-      .fetch(
-        "PUT",
-        data.signedUrl,
-        {
-          "Content-Type":
-            contentType,
-          "Cache-Control":
-            "max-age=3600",
-          "x-upsert":
-            "false",
-        },
-        ReactNativeBlobUtil.wrap(
-          localPath
-        )
-      );
-
-  uploadTaskRef.current =
-    uploadTask;
-
-  let response: any;
-
-  try {
-    response =
-      await uploadTask;
-  } finally {
     if (
-      uploadTaskRef.current ===
-        uploadTask
+      cancelRequestedRef.current
     ) {
-      uploadTaskRef.current =
-        null;
+      throw new Error(
+        `Upload ${label} dibatalkan.`
+      );
     }
-  }
-
-  const status =
-    Number(
-      response.info().status
-    );
-
-  if (
-    !Number.isFinite(
-      status
-    ) ||
-    status < 200 ||
-    status >= 300
-  ) {
-    let responseText = "";
 
     try {
-      responseText =
-        String(
-          await response.text()
-        ).trim();
-    } catch {
-      responseText = "";
-    }
+      const {
+        data,
+        error,
+      } =
+        await supabase.storage
+          .from(
+            bucket
+          )
+          .createSignedUploadUrl(
+            storagePath,
+            {
+              upsert: false,
+            }
+          );
 
-    throw new Error(
-      responseText
-        ? `Upload ${label} gagal (${status}): ${responseText}`
-        : `Upload ${label} gagal (${status}).`
-    );
+      if (error) {
+        throw error;
+      }
+
+      if (
+        !data?.signedUrl
+      ) {
+        throw new Error(
+          `URL upload ${label} belum tersedia.`
+        );
+      }
+
+      if (
+        cancelRequestedRef.current
+      ) {
+        throw new Error(
+          `Upload ${label} dibatalkan.`
+        );
+      }
+
+      const uploadTask =
+        ReactNativeBlobUtil
+          .fetch(
+            "PUT",
+            data.signedUrl,
+            {
+              "Content-Type":
+                contentType,
+              "Cache-Control":
+                "max-age=3600",
+              "x-upsert":
+                "false",
+            },
+            ReactNativeBlobUtil.wrap(
+              localPath
+            )
+          );
+
+      uploadTaskRef.current =
+        uploadTask;
+
+      let response: any;
+
+      try {
+        response =
+          await uploadTask;
+      } finally {
+        if (
+          uploadTaskRef.current ===
+            uploadTask
+        ) {
+          uploadTaskRef.current =
+            null;
+        }
+      }
+
+      if (
+        cancelRequestedRef.current
+      ) {
+        throw new Error(
+          `Upload ${label} dibatalkan.`
+        );
+      }
+
+      const status =
+        Number(
+          response.info().status
+        );
+
+      if (
+        Number.isFinite(status) &&
+        status >= 200 &&
+        status < 300
+      ) {
+        return Math.trunc(
+          sizeBytes
+        );
+      }
+
+      let responseText = "";
+
+      try {
+        responseText =
+          String(
+            await response.text()
+          ).trim();
+      } catch {
+        responseText = "";
+      }
+
+      const httpError =
+        new Error(
+          responseText
+            ? `Upload ${label} gagal (${status}): ${responseText}`
+            : `Upload ${label} gagal (${status}).`
+        ) as Error & {
+          statusCode?: number;
+        };
+
+      if (
+        Number.isFinite(status)
+      ) {
+        httpError.statusCode =
+          status;
+      }
+
+      const canRetryStatus =
+        !Number.isFinite(status) ||
+        isRetryableStoreDocumentUploadStatus(
+          status
+        );
+
+      if (
+        attempt <
+          STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS &&
+        canRetryStatus &&
+        !cancelRequestedRef.current
+      ) {
+        console.warn(
+          `Upload ${label} gagal sementara (${status}); mencoba ulang 1x.`
+        );
+
+        await waitForStoreDocumentUploadRetry();
+
+        continue;
+      }
+
+      throw httpError;
+    } catch (error) {
+      lastError =
+        error;
+
+      if (
+        cancelRequestedRef.current
+      ) {
+        throw error;
+      }
+
+      const errorStatus =
+        getStoreDocumentUploadErrorStatus(
+          error
+        );
+
+      const canRetryError =
+        errorStatus == null ||
+        isRetryableStoreDocumentUploadStatus(
+          errorStatus
+        );
+
+      if (
+        attempt <
+          STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS &&
+        canRetryError
+      ) {
+        console.warn(
+          `Upload ${label} mengalami gangguan; mencoba ulang 1x.`,
+          error
+        );
+
+        await waitForStoreDocumentUploadRetry();
+
+        continue;
+      }
+
+      throw error;
+    }
   }
 
-  return Math.trunc(
-    sizeBytes
+  throw (
+    lastError instanceof Error
+      ? lastError
+      : new Error(
+          `Upload ${label} gagal.`
+        )
   );
 }
 
@@ -1010,7 +1186,12 @@ export default function UploadProductScreen({
       StoreDocumentUploadTask | null
     >(null);
 
+  const documentUploadCancelledRef =
+    useRef(false);
+
   function cancelActiveDocumentUpload() {
+    documentUploadCancelledRef.current =
+      true;
     const activeTask =
       activeDocumentUploadRef.current;
 
@@ -2688,7 +2869,8 @@ export default function UploadProductScreen({
           "productOriginalBytes",
           "File Word",
           originalMimeType,
-          activeDocumentUploadRef
+          activeDocumentUploadRef,
+          documentUploadCancelledRef
         );
 
       originalUploaded =
@@ -2705,7 +2887,8 @@ export default function UploadProductScreen({
           "productPreviewBytes",
           "PDF pratinjau",
           "application/pdf",
-          activeDocumentUploadRef
+          activeDocumentUploadRef,
+          documentUploadCancelledRef
         );
 
       updateUploadProgress(80);
@@ -2739,6 +2922,9 @@ export default function UploadProductScreen({
 
   async function handleUpload() {
     if (submitting) return;
+
+    documentUploadCancelledRef.current =
+      false;
 
     setMessage("");
     setErrorMessage("");
@@ -3184,7 +3370,8 @@ export default function UploadProductScreen({
                 "productDocumentBytes",
                 "File PDF",
                 pdfMimeType,
-                activeDocumentUploadRef
+                activeDocumentUploadRef,
+                documentUploadCancelledRef
               );
 
             const stagedPdfChange =
@@ -4017,7 +4204,8 @@ export default function UploadProductScreen({
               "File PDF",
               productFile.mimeType ??
                 "application/pdf",
-              activeDocumentUploadRef
+              activeDocumentUploadRef,
+              documentUploadCancelledRef
             );
         } else {
           const fileBuffer =
