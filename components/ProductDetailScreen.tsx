@@ -35,6 +35,9 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import ReactNativeBlobUtil from "react-native-blob-util";
 import { supabase } from "../lib/supabase";
 import {
+  trackMediaObservabilityEvent,
+} from "../lib/mediaObservability";
+import {
   createPrivateStoreMediaSignedUrl,
   STORE_MEDIA_BUCKETS,
   STORE_MEDIA_SIGNED_URL_TTL,
@@ -2931,6 +2934,132 @@ export default function ProductDetailScreen({
     setProductAccessLoading(true);
     setDownloadProgress(0);
 
+    const observabilityStartedAt =
+      Date.now();
+
+    let observabilityBucket:
+      StorePrivateMediaBucket | null =
+        null;
+
+    let observabilityStoragePath:
+      string | null =
+        null;
+
+    let observabilityBytesTransferred =
+      0;
+
+    let observabilityCacheReused =
+      false;
+
+    let observabilityPageCount:
+      number | null =
+        null;
+
+    const telemetryErrorMessage = (
+      error: unknown
+    ) =>
+      (
+        error instanceof Error
+          ? error.message
+          : String(
+              error ?? "unknown"
+            )
+      ).slice(0, 500);
+
+    const trackDownloadSuccess = (
+      metadata:
+        Record<string, unknown>
+    ) => {
+      void trackMediaObservabilityEvent({
+        eventType:
+          "download_success",
+        mediaScope:
+          "store_product",
+        productId:
+          product.id,
+        bucket:
+          observabilityBucket,
+        storagePath:
+          observabilityStoragePath,
+        bytesTransferred:
+          observabilityBytesTransferred,
+        latencyMs:
+          Date.now() -
+          observabilityStartedAt,
+        source:
+          "product_detail",
+        metadata,
+      });
+    };
+
+    const trackDownloadFailure = (
+      error: unknown
+    ) => {
+      void trackMediaObservabilityEvent({
+        eventType:
+          "download_failed",
+        mediaScope:
+          "store_product",
+        productId:
+          product.id,
+        bucket:
+          observabilityBucket,
+        storagePath:
+          observabilityStoragePath,
+        bytesTransferred:
+          observabilityBytesTransferred,
+        latencyMs:
+          Date.now() -
+          observabilityStartedAt,
+        source:
+          "product_detail",
+        metadata: {
+          cache_reused:
+            observabilityCacheReused,
+          page_count:
+            observabilityPageCount,
+          error_message:
+            telemetryErrorMessage(
+              error
+            ),
+        },
+      });
+    };
+
+    const trackSignedUrlFailure = (
+      bucket:
+        StorePrivateMediaBucket,
+      storagePath: string,
+      startedAt: number,
+      error: unknown,
+      metadata:
+        Record<string, unknown> = {}
+    ) => {
+      void trackMediaObservabilityEvent({
+        eventType:
+          "signed_url_failed",
+        mediaScope:
+          "store_product",
+        productId:
+          product.id,
+        bucket,
+        storagePath,
+        bytesTransferred: 0,
+        latencyMs:
+          Date.now() -
+          startedAt,
+        source:
+          "product_detail",
+        metadata: {
+          ...metadata,
+          error_message:
+            telemetryErrorMessage(
+              error
+            ),
+        },
+      });
+    };
+
     try {
       /*
        * OFFICE_ORIGINAL_DOWNLOAD_V1
@@ -3068,14 +3197,64 @@ export default function ProductDetailScreen({
              * Gunakan signer yang sama dengan viewer.
              * storage_path tetap authority.
              */
-            const signedPageUrl =
-              await pagePreview.getUrl(
-                product.id,
+            observabilityBucket =
+              STORE_MEDIA_BUCKETS.productFiles;
+
+            observabilityStoragePath =
+              page.storage_path;
+
+            observabilityPageCount =
+              imagePages.length;
+
+            let pageLastReceived =
+              0;
+
+            const signedUrlStartedAt =
+              Date.now();
+
+            let signedPageUrl:
+              string | null =
+                null;
+
+            try {
+              signedPageUrl =
+                await pagePreview.getUrl(
+                  product.id,
+                  page.storage_path,
+                  page.page_number
+                );
+            } catch (error) {
+              trackSignedUrlFailure(
+                STORE_MEDIA_BUCKETS.productFiles,
                 page.storage_path,
-                page.page_number
+                signedUrlStartedAt,
+                error,
+                {
+                  mode:
+                    "multipage_image",
+                  page_number:
+                    index + 1,
+                }
               );
 
+              throw error;
+            }
+
             if (!signedPageUrl) {
+              trackSignedUrlFailure(
+                STORE_MEDIA_BUCKETS.productFiles,
+                page.storage_path,
+                signedUrlStartedAt,
+                new Error(
+                  "Signed URL tidak tersedia."
+                ),
+                {
+                  mode:
+                    "multipage_image",
+                  page_number:
+                    index + 1,
+                }
+              );
               throw new Error(
                 "Halaman " +
                   String(index + 1) +
@@ -3149,6 +3328,28 @@ export default function ProductDetailScreen({
                         received,
                         total
                       ) => {
+                        const receivedBytes =
+                          Number(received);
+
+                        if (
+                          Number.isFinite(
+                            receivedBytes
+                          ) &&
+                          receivedBytes >
+                            pageLastReceived
+                        ) {
+                          observabilityBytesTransferred +=
+                            Math.trunc(
+                              receivedBytes -
+                                pageLastReceived
+                            );
+
+                          pageLastReceived =
+                            Math.trunc(
+                              receivedBytes
+                            );
+                        }
+
                         reportDownloadProgress(
                           received,
                           total,
@@ -3266,6 +3467,28 @@ export default function ProductDetailScreen({
                         received,
                         total
                       ) => {
+                        const receivedBytes =
+                          Number(received);
+
+                        if (
+                          Number.isFinite(
+                            receivedBytes
+                          ) &&
+                          receivedBytes >
+                            pageLastReceived
+                        ) {
+                          observabilityBytesTransferred +=
+                            Math.trunc(
+                              receivedBytes -
+                                pageLastReceived
+                            );
+
+                          pageLastReceived =
+                            Math.trunc(
+                              receivedBytes
+                            );
+                        }
+
                         reportDownloadProgress(
                           received,
                           total,
@@ -3309,6 +3532,28 @@ export default function ProductDetailScreen({
                         received,
                         total
                       ) => {
+                        const receivedBytes =
+                          Number(received);
+
+                        if (
+                          Number.isFinite(
+                            receivedBytes
+                          ) &&
+                          receivedBytes >
+                            pageLastReceived
+                        ) {
+                          observabilityBytesTransferred +=
+                            Math.trunc(
+                              receivedBytes -
+                                pageLastReceived
+                            );
+
+                          pageLastReceived =
+                            Math.trunc(
+                              receivedBytes
+                            );
+                        }
+
                         reportDownloadProgress(
                           received,
                           total,
@@ -3357,6 +3602,18 @@ export default function ProductDetailScreen({
               total: imagePages.length,
             })
           );
+
+          observabilityStoragePath =
+            null;
+
+          trackDownloadSuccess({
+            mode:
+              "multipage_image",
+            page_count:
+              imagePages.length,
+            cache_reused:
+              false,
+          });
 
           return;
         }
@@ -3425,14 +3682,57 @@ export default function ProductDetailScreen({
         );
       }
 
-      const signedUrl =
-        await createPrivateStoreMediaSignedUrl(
+      observabilityBucket =
+        downloadBucket;
+
+      observabilityStoragePath =
+        downloadFilePath;
+
+      observabilityPageCount =
+        null;
+
+      const signedUrlStartedAt =
+        Date.now();
+
+      let signedUrl:
+        string | null =
+          null;
+
+      try {
+        signedUrl =
+          await createPrivateStoreMediaSignedUrl(
+            downloadBucket,
+            downloadFilePath,
+            STORE_MEDIA_SIGNED_URL_TTL.downloadSeconds
+          );
+      } catch (error) {
+        trackSignedUrlFailure(
           downloadBucket,
           downloadFilePath,
-          STORE_MEDIA_SIGNED_URL_TTL.downloadSeconds
+          signedUrlStartedAt,
+          error,
+          {
+            mode:
+              "single_file",
+          }
         );
 
+        throw error;
+      }
+
       if (!signedUrl) {
+        trackSignedUrlFailure(
+          downloadBucket,
+          downloadFilePath,
+          signedUrlStartedAt,
+          new Error(
+            "Signed URL tidak tersedia."
+          ),
+          {
+            mode:
+              "single_file",
+          }
+        );
         throw new Error(
           "Signed URL tidak tersedia."
         );
@@ -3595,6 +3895,9 @@ export default function ProductDetailScreen({
                   shouldCleanupTemporaryPath =
                     false;
 
+                  observabilityCacheReused =
+                    true;
+
                   setDownloadProgress(99);
 
                   console.log(
@@ -3641,6 +3944,22 @@ export default function ProductDetailScreen({
                     received,
                     total
                   ) => {
+                    const receivedBytes =
+                      Number(received);
+
+                    if (
+                      Number.isFinite(
+                        receivedBytes
+                      ) &&
+                      receivedBytes >
+                        observabilityBytesTransferred
+                    ) {
+                      observabilityBytesTransferred =
+                        Math.trunc(
+                          receivedBytes
+                        );
+                    }
+
                     reportDownloadProgress(
                       received,
                       total
@@ -3733,6 +4052,13 @@ export default function ProductDetailScreen({
             }
           }
 
+          trackDownloadSuccess({
+            mode:
+              "single_file",
+            cache_reused:
+              observabilityCacheReused,
+          });
+
           return;
         }
 
@@ -3770,6 +4096,22 @@ export default function ProductDetailScreen({
                     received,
                     total
                   ) => {
+                    const receivedBytes =
+                      Number(received);
+
+                    if (
+                      Number.isFinite(
+                        receivedBytes
+                      ) &&
+                      receivedBytes >
+                        observabilityBytesTransferred
+                    ) {
+                      observabilityBytesTransferred =
+                        Math.trunc(
+                          receivedBytes
+                        );
+                    }
+
                     reportDownloadProgress(
                       received,
                       total
@@ -3786,6 +4128,13 @@ export default function ProductDetailScreen({
           mime
         );
         setDownloadSuccessFileName(safeName);
+
+        trackDownloadSuccess({
+          mode:
+            "single_file",
+          cache_reused:
+            false,
+        });
 
         return;
       }
@@ -3812,6 +4161,22 @@ export default function ProductDetailScreen({
                     received,
                     total
                   ) => {
+                    const receivedBytes =
+                      Number(received);
+
+                    if (
+                      Number.isFinite(
+                        receivedBytes
+                      ) &&
+                      receivedBytes >
+                        observabilityBytesTransferred
+                    ) {
+                      observabilityBytesTransferred =
+                        Math.trunc(
+                          receivedBytes
+                        );
+                    }
+
                     reportDownloadProgress(
                       received,
                       total
@@ -3821,12 +4186,23 @@ export default function ProductDetailScreen({
 
       setDownloadProgress(100);
 
+      trackDownloadSuccess({
+        mode:
+          "single_file",
+        cache_reused:
+          false,
+      });
+
       Alert.alert(
         "Unduhan selesai",
         "File telah disimpan di perangkat."
       );
     }
     catch (error) {
+      trackDownloadFailure(
+        error
+      );
+
       console.error(
         "Unduh produk gagal:",
         error
