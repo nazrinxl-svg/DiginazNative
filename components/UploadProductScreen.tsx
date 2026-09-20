@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Animated,
+  Modal,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -995,6 +996,14 @@ export default function UploadProductScreen({
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] =
     useState("");
+
+  const [
+    uploadLimitModal,
+    setUploadLimitModal,
+  ] =
+    useState<{
+      message: string;
+    } | null>(null);
 
   const activeDocumentUploadRef =
     useRef<
@@ -2382,6 +2391,51 @@ export default function UploadProductScreen({
     }
 
 
+    const assetSizeBytes =
+      getPickedAssetSizeBytes(
+        asset.size
+      );
+
+    if (
+      assetSizeBytes != null
+    ) {
+      const sizeLimitKey:
+        StoreMediaUploadSizeLimitKey =
+        productFileKind === "office"
+          ? "productOriginalBytes"
+          : "productDocumentBytes";
+
+      const sizeLabel =
+        productFileKind === "office"
+          ? "File Word"
+          : "File PDF";
+
+      try {
+        assertStoreMediaUploadSize(
+          assetSizeBytes,
+          sizeLimitKey,
+          sizeLabel
+        );
+      } catch (error) {
+        setProductFile(null);
+
+        const message =
+          error instanceof Error
+            ? error.message
+            : `${sizeLabel} terlalu besar.`;
+
+        setErrorMessage(
+          message
+        );
+
+        setUploadLimitModal({
+          message,
+        });
+
+        return;
+      }
+    }
+
     const pdfPageCount =
       productFileKind === "pdf"
         ? await getPickedPdfPageCount(
@@ -2461,6 +2515,40 @@ export default function UploadProductScreen({
         );
 
         return;
+      }
+
+      const previewSizeBytes =
+        getPickedAssetSizeBytes(
+          asset.size
+        );
+
+      if (
+        previewSizeBytes != null
+      ) {
+        try {
+          assertStoreMediaUploadSize(
+            previewSizeBytes,
+            "productPreviewBytes",
+            "PDF pratinjau"
+          );
+        } catch (error) {
+          setPreviewPdfFile(null);
+
+          const message =
+            error instanceof Error
+              ? error.message
+              : "PDF pratinjau terlalu besar.";
+
+          setErrorMessage(
+            message
+          );
+
+          setUploadLimitModal({
+            message,
+          });
+
+          return;
+        }
       }
 
       const previewPageCount =
@@ -2614,7 +2702,7 @@ export default function UploadProductScreen({
           STORE_MEDIA_BUCKETS.productFiles,
           pdfPath,
           previewAsset,
-          "productFileBytes",
+          "productPreviewBytes",
           "PDF pratinjau",
           "application/pdf",
           activeDocumentUploadRef
@@ -3093,7 +3181,7 @@ export default function UploadProductScreen({
                 STORE_MEDIA_BUCKETS.productFiles,
                 filePath,
                 productFile,
-                "productFileBytes",
+                "productDocumentBytes",
                 "File PDF",
                 pdfMimeType,
                 activeDocumentUploadRef
@@ -3925,7 +4013,7 @@ export default function UploadProductScreen({
               STORE_MEDIA_BUCKETS.productFiles,
               filePath,
               productFile,
-              "productFileBytes",
+              "productDocumentBytes",
               "File PDF",
               productFile.mimeType ??
                 "application/pdf",
@@ -5249,6 +5337,92 @@ export default function UploadProductScreen({
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={
+          uploadLimitModal !== null
+        }
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() =>
+          setUploadLimitModal(
+            null
+          )
+        }
+      >
+        <View
+          style={
+            styles.uploadLimitModalRoot
+          }
+        >
+          <Pressable
+            style={
+              styles.uploadLimitModalBackdrop
+            }
+            onPress={() =>
+              setUploadLimitModal(
+                null
+              )
+            }
+          />
+
+          <View
+            style={
+              styles.uploadLimitModalCard
+            }
+          >
+            <View
+              style={
+                styles.uploadLimitModalIcon
+              }
+            >
+              <FileText
+                size={23}
+                color="#F97316"
+                strokeWidth={1.9}
+              />
+            </View>
+
+            <Text
+              style={
+                styles.uploadLimitModalTitle
+              }
+            >
+              File terlalu besar
+            </Text>
+
+            <Text
+              style={
+                styles.uploadLimitModalDescription
+              }
+            >
+              {
+                uploadLimitModal?.message
+              }
+            </Text>
+
+            <Pressable
+              style={
+                styles.uploadLimitModalButton
+              }
+              onPress={() =>
+                setUploadLimitModal(
+                  null
+                )
+              }
+            >
+              <Text
+                style={
+                  styles.uploadLimitModalButtonText
+                }
+              >
+                Mengerti
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -5729,6 +5903,84 @@ const styles = StyleSheet.create({
   },
 
   submitText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11,
+    color: "#FFFFFF",
+  },
+
+  uploadLimitModalRoot: {
+    flex: 1,
+    paddingHorizontal: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  uploadLimitModalBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor:
+      "rgba(15, 23, 42, 0.48)",
+  },
+
+  uploadLimitModalCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 22,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 18,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOffset: {
+      width: 0,
+      height: 10,
+    },
+    shadowOpacity: 0.15,
+    shadowRadius: 24,
+    elevation: 12,
+  },
+
+  uploadLimitModalIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFF7ED",
+  },
+
+  uploadLimitModalTitle: {
+    marginTop: 14,
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 16,
+    color: "#0F172A",
+    textAlign: "center",
+  },
+
+  uploadLimitModalDescription: {
+    marginTop: 7,
+    maxWidth: 290,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11.5,
+    lineHeight: 18,
+    color: "#64748B",
+    textAlign: "center",
+  },
+
+  uploadLimitModalButton: {
+    width: "100%",
+    minHeight: 44,
+    marginTop: 18,
+    borderRadius: 12,
+    backgroundColor: "#2563EB",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  uploadLimitModalButtonText: {
     fontFamily:
       "PlusJakartaSans_600SemiBold",
     fontSize: 11,

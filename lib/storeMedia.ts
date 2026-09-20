@@ -143,13 +143,29 @@ export type StoreProductMediaRole =
 export const STORE_MEDIA_UPLOAD_LIMITS = {
   maxImagePages: 15,
   thumbnailBytes: 2 * 1024 * 1024,
+
+  // Gambar produk tetap memakai
+  // limit transport yang lama.
   productFileBytes: 50 * 1024 * 1024,
-  productOriginalBytes: 50 * 1024 * 1024,
+
+  // PDF utama.
+  productDocumentBytes:
+    15 * 1024 * 1024,
+
+  // PDF preview.
+  productPreviewBytes:
+    10 * 1024 * 1024,
+
+  // Word asli.
+  productOriginalBytes:
+    15 * 1024 * 1024,
 } as const;
 
 export type StoreMediaUploadSizeLimitKey =
   | "thumbnailBytes"
   | "productFileBytes"
+  | "productDocumentBytes"
+  | "productPreviewBytes"
   | "productOriginalBytes";
 
 export function assertStoreMediaUploadSize(
