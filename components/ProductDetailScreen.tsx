@@ -1443,6 +1443,14 @@ export default function ProductDetailScreen({
     let temporaryPdfPath:
       string | null = null;
 
+    let pdfDownloadTask:
+      {
+        cancel: () => unknown;
+      } | null = null;
+
+    let pdfDownloadPath:
+      string | null = null;
+
     pdfRenderingRef.current.clear();
     pdfRenderedPathsRef.current.clear();
 
@@ -1605,21 +1613,36 @@ export default function ProductDetailScreen({
           }
 
           try {
-            await ReactNativeBlobUtil
-              .config({
-                path:
-                  cachedPdfPath,
-              })
-              .fetch(
-                "GET",
-                signedPdfUrl
-              );
+            pdfDownloadPath =
+              cachedPdfPath;
+
+            const nextPdfDownloadTask =
+              ReactNativeBlobUtil
+                .config({
+                  path:
+                    cachedPdfPath,
+                })
+                .fetch(
+                  "GET",
+                  signedPdfUrl
+                );
+
+            pdfDownloadTask =
+              nextPdfDownloadTask;
+
+            await nextPdfDownloadTask;
           } catch (downloadError) {
             await deleteStorePdfCacheFileIfExists(
               cachedPdfPath
             );
 
             throw downloadError;
+          } finally {
+            pdfDownloadTask =
+              null;
+
+            pdfDownloadPath =
+              null;
           }
 
           try {
@@ -1766,6 +1789,35 @@ export default function ProductDetailScreen({
 
     return () => {
       active = false;
+
+      const activePdfDownloadTask =
+        pdfDownloadTask;
+
+      const activePdfDownloadPath =
+        pdfDownloadPath;
+
+      pdfDownloadTask =
+        null;
+
+      pdfDownloadPath =
+        null;
+
+      if (activePdfDownloadTask) {
+        try {
+          activePdfDownloadTask.cancel();
+        } catch (cancelError) {
+          console.warn(
+            "Cancel download PDF viewer gagal:",
+            cancelError
+          );
+        }
+      }
+
+      if (activePdfDownloadPath) {
+        void deleteStorePdfCacheFileIfExists(
+          activePdfDownloadPath
+        );
+      }
 
       pdfRenderingRef.current.clear();
       pdfRenderedPathsRef.current.clear();
