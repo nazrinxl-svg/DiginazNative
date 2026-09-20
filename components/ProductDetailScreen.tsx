@@ -849,6 +849,78 @@ export default function ProductDetailScreen({
     setPdfViewerError,
   ] = useState("");
 
+  const [
+    pdfViewerRetryNonce,
+    setPdfViewerRetryNonce,
+  ] = useState(0);
+
+  const [
+    failedPdfPages,
+    setFailedPdfPages,
+  ] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  const [
+    retryingPdfPages,
+    setRetryingPdfPages,
+  ] = useState<Set<number>>(
+    () => new Set()
+  );
+
+  const [
+    pdfPageRetryNonce,
+    setPdfPageRetryNonce,
+  ] = useState(0);
+
+  function retryPdfViewer() {
+    setPdfViewerError("");
+
+    setPdfViewerRetryNonce(
+      current =>
+        current + 1
+    );
+  }
+
+  function retryPdfPage(
+    index: number
+  ) {
+    if (
+      retryingPdfPages.has(
+        index
+      )
+    ) {
+      return;
+    }
+
+    setRetryingPdfPages(
+      current => {
+        const next =
+          new Set(current);
+
+        next.add(index);
+
+        return next;
+      }
+    );
+
+    setFailedPdfPages(
+      current => {
+        const next =
+          new Set(current);
+
+        next.delete(index);
+
+        return next;
+      }
+    );
+
+    setPdfPageRetryNonce(
+      current =>
+        current + 1
+    );
+  }
+
   const pdfRenderingRef =
     useRef(new Set<number>());
 
@@ -1374,6 +1446,13 @@ export default function ProductDetailScreen({
     pdfRenderingRef.current.clear();
     pdfRenderedPathsRef.current.clear();
 
+    setFailedPdfPages(
+      new Set()
+    );
+    setRetryingPdfPages(
+      new Set()
+    );
+
     setPdfLocalPath(null);
     setPdfPageUrls([]);
     setPdfPageCount(0);
@@ -1701,6 +1780,7 @@ export default function ProductDetailScreen({
     detail?.file_path,
     detail?.updated_at,
     product.id,
+    pdfViewerRetryNonce,
   ]);
 
 
@@ -1735,6 +1815,14 @@ export default function ProductDetailScreen({
       pdfPageUrls[targetIndex] ||
       pdfRenderingRef.current.has(
         targetIndex
+      ) ||
+      (
+        failedPdfPages.has(
+          targetIndex
+        ) &&
+        !retryingPdfPages.has(
+          targetIndex
+        )
       )
     ) {
       return;
@@ -1793,10 +1881,40 @@ export default function ProductDetailScreen({
           "Halaman PDF gagal dirender:",
           error
         );
+
+        setFailedPdfPages(
+          current => {
+            const next =
+              new Set(current);
+
+            next.add(
+              targetIndex
+            );
+
+            return next;
+          }
+        );
       })
       .finally(() => {
         pdfRenderingRef.current.delete(
           targetIndex
+        );
+
+        if (!active) {
+          return;
+        }
+
+        setRetryingPdfPages(
+          current => {
+            const next =
+              new Set(current);
+
+            next.delete(
+              targetIndex
+            );
+
+            return next;
+          }
         );
       });
 
@@ -1808,6 +1926,9 @@ export default function ProductDetailScreen({
     pdfPageCount,
     pdfPageUrls,
     activeProductSlide,
+    failedPdfPages,
+    retryingPdfPages,
+    pdfPageRetryNonce,
   ]);
 
 
@@ -4256,16 +4377,55 @@ export default function ProductDetailScreen({
                             resizeMode="contain"
                           />
                         ) : (
-                          <View
-                            style={
-                              styles.pdfPageLoading
-                            }
-                          >
-                            <ActivityIndicator
-                              size="small"
-                              color="#2563EB"
-                            />
-                          </View>
+                          failedPdfPages.has(
+                            index
+                          ) ? (
+                            <View
+                              style={[
+                                styles.pdfPageLoading,
+                                styles.pdfFailureContent,
+                              ]}
+                            >
+                              <Text
+                                style={
+                                  styles.pdfFailureText
+                                }
+                              >
+                                Halaman PDF belum dapat ditampilkan.
+                              </Text>
+
+                              <Pressable
+                                style={
+                                  styles.pdfRetryButton
+                                }
+                                onPress={() =>
+                                  retryPdfPage(
+                                    index
+                                  )
+                                }
+                                accessibilityRole="button"
+                              >
+                                <Text
+                                  style={
+                                    styles.pdfRetryText
+                                  }
+                                >
+                                  Coba lagi
+                                </Text>
+                              </Pressable>
+                            </View>
+                          ) : (
+                            <View
+                              style={
+                                styles.pdfPageLoading
+                              }
+                            >
+                              <ActivityIndicator
+                                size="small"
+                                color="#2563EB"
+                              />
+                            </View>
+                          )
                         )}
 
                         <View
@@ -4294,11 +4454,37 @@ export default function ProductDetailScreen({
                   }
                 >
                   {pdfViewerError ? (
-                    <Text
-                      style={styles.errorText}
+                    <View
+                      style={
+                        styles.pdfFailureContent
+                      }
                     >
-                      {pdfViewerError}
-                    </Text>
+                      <Text
+                        style={
+                          styles.pdfFailureText
+                        }
+                      >
+                        {pdfViewerError}
+                      </Text>
+
+                      <Pressable
+                        style={
+                          styles.pdfRetryButton
+                        }
+                        onPress={
+                          retryPdfViewer
+                        }
+                        accessibilityRole="button"
+                      >
+                        <Text
+                          style={
+                            styles.pdfRetryText
+                          }
+                        >
+                          Coba lagi
+                        </Text>
+                      </Pressable>
+                    </View>
                   ) : (
                     <ActivityIndicator
                       size="small"
@@ -5678,6 +5864,39 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#FFFFFF",
+  },
+
+  pdfFailureContent: {
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    paddingHorizontal: 20,
+  },
+
+  pdfFailureText: {
+    fontFamily:
+      "PlusJakartaSans_600SemiBold",
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#B91C1C",
+    textAlign: "center",
+  },
+
+  pdfRetryButton: {
+    minWidth: 92,
+    height: 36,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#EFF6FF",
+  },
+
+  pdfRetryText: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 11,
+    color: "#2563EB",
   },
 
   pdfInitialLoading: {
