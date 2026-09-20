@@ -720,13 +720,28 @@ function normalizeStoreDocumentUploadPath(
   }
 }
 
+type StoreDocumentUploadTask = {
+  cancel: (
+    callback?: (
+      reason: any
+    ) => void
+  ) => unknown;
+};
+
+type StoreDocumentUploadTaskRef = {
+  current:
+    StoreDocumentUploadTask | null;
+};
+
 async function uploadStoreDocumentNative(
   bucket: string,
   storagePath: string,
   asset: PickedAsset,
   limitKey: StoreMediaUploadSizeLimitKey,
   label: string,
-  contentType: string
+  contentType: string,
+  uploadTaskRef:
+    StoreDocumentUploadTaskRef
 ): Promise<number> {
   if (
     asset.sizeBytes != null
@@ -810,8 +825,8 @@ async function uploadStoreDocumentNative(
     );
   }
 
-  const response =
-    await ReactNativeBlobUtil
+  const uploadTask =
+    ReactNativeBlobUtil
       .fetch(
         "PUT",
         data.signedUrl,
@@ -827,6 +842,24 @@ async function uploadStoreDocumentNative(
           localPath
         )
       );
+
+  uploadTaskRef.current =
+    uploadTask;
+
+  let response: any;
+
+  try {
+    response =
+      await uploadTask;
+  } finally {
+    if (
+      uploadTaskRef.current ===
+        uploadTask
+    ) {
+      uploadTaskRef.current =
+        null;
+    }
+  }
 
   const status =
     Number(
@@ -962,6 +995,38 @@ export default function UploadProductScreen({
   const [message, setMessage] = useState("");
   const [errorMessage, setErrorMessage] =
     useState("");
+
+  const activeDocumentUploadRef =
+    useRef<
+      StoreDocumentUploadTask | null
+    >(null);
+
+  function cancelActiveDocumentUpload() {
+    const activeTask =
+      activeDocumentUploadRef.current;
+
+    activeDocumentUploadRef.current =
+      null;
+
+    if (!activeTask) {
+      return;
+    }
+
+    try {
+      activeTask.cancel();
+    } catch (cancelError) {
+      console.warn(
+        "Cancel upload dokumen gagal:",
+        cancelError
+      );
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      cancelActiveDocumentUpload();
+    };
+  }, []);
 
   useEffect(() => {
     if (!editProductId) {
@@ -2534,7 +2599,8 @@ export default function UploadProductScreen({
           wordAsset,
           "productOriginalBytes",
           "File Word",
-          originalMimeType
+          originalMimeType,
+          activeDocumentUploadRef
         );
 
       originalUploaded =
@@ -2550,7 +2616,8 @@ export default function UploadProductScreen({
           previewAsset,
           "productFileBytes",
           "PDF pratinjau",
-          "application/pdf"
+          "application/pdf",
+          activeDocumentUploadRef
         );
 
       updateUploadProgress(80);
@@ -3028,7 +3095,8 @@ export default function UploadProductScreen({
                 productFile,
                 "productFileBytes",
                 "File PDF",
-                pdfMimeType
+                pdfMimeType,
+                activeDocumentUploadRef
               );
 
             const stagedPdfChange =
@@ -3860,7 +3928,8 @@ export default function UploadProductScreen({
               "productFileBytes",
               "File PDF",
               productFile.mimeType ??
-                "application/pdf"
+                "application/pdf",
+              activeDocumentUploadRef
             );
         } else {
           const fileBuffer =
@@ -4126,7 +4195,10 @@ export default function UploadProductScreen({
         <View style={styles.header}>
           <Pressable
             style={styles.backButton}
-            onPress={onClose}
+            onPress={() => {
+              cancelActiveDocumentUpload();
+              onClose();
+            }}
             hitSlop={8}
           >
             <ArrowLeft
