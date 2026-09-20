@@ -1078,6 +1078,9 @@ export default function ChatScreen({
     let uploadedPath:
       string | null = null;
 
+    let uploadedSizeBytes:
+      number | null = null;
+
     setSending(true);
     setErrorMessage("");
 
@@ -1114,6 +1117,9 @@ export default function ChatScreen({
             (response) =>
               response.arrayBuffer()
           );
+
+        uploadedSizeBytes =
+          arrayBuffer.byteLength;
 
         const {
           error: uploadError,
@@ -1161,6 +1167,7 @@ export default function ChatScreen({
               attachment?.mimeType ??
               null,
             attachment_size_bytes:
+              uploadedSizeBytes ??
               attachment?.size ??
               null,
           })
