@@ -110,7 +110,328 @@ type Props = {
   onOpenCreatorProfile: (
     creatorUserId: string
   ) => void;
+
 };
+
+type StorePdfCacheEntry = {
+  path: string;
+  sizeBytes: number;
+  modifiedAt: number;
+};
+
+const STORE_PDF_CACHE_POLICY = {
+  maxAgeMs:
+    7 * 24 * 60 * 60 * 1000,
+  originalMaxFiles:
+    3,
+  originalMaxBytes:
+    100 * 1024 * 1024,
+  renderedMaxFiles:
+    200,
+  renderedMaxBytes:
+    96 * 1024 * 1024,
+} as const;
+
+function normalizeStorePdfCachePath(
+  value: string
+) {
+  const clean =
+    value.trim();
+
+  if (
+    clean.startsWith(
+      "file://"
+    )
+  ) {
+    return clean.slice(
+      "file://".length
+    );
+  }
+
+  return clean;
+}
+
+function normalizeStorePdfCacheModifiedAt(
+  value: unknown
+) {
+  const numeric =
+    Number(value);
+
+  if (
+    Number.isFinite(numeric) &&
+    numeric > 0
+  ) {
+    return numeric <
+      1_000_000_000_000
+      ? numeric * 1000
+      : numeric;
+  }
+
+  const parsed =
+    Date.parse(
+      String(
+        value ?? ""
+      )
+    );
+
+  return Number.isFinite(parsed)
+    ? parsed
+    : 0;
+}
+
+async function deleteStorePdfCacheFileIfExists(
+  path: string
+) {
+  try {
+    const exists =
+      await ReactNativeBlobUtil
+        .fs
+        .exists(
+          path
+        );
+
+    if (!exists) {
+      return;
+    }
+
+    await ReactNativeBlobUtil
+      .fs
+      .unlink(
+        path
+      );
+  } catch (error) {
+    console.warn(
+      "Cleanup cache PDF gagal:",
+      error
+    );
+  }
+}
+
+async function removeSupersededProductPdfCacheFiles(
+  directory: string,
+  productId: string,
+  keepPath: string
+) {
+  try {
+    const directoryExists =
+      await ReactNativeBlobUtil
+        .fs
+        .exists(
+          directory
+        );
+
+    if (!directoryExists) {
+      return;
+    }
+
+    const names =
+      await ReactNativeBlobUtil
+        .fs
+        .ls(
+          directory
+        );
+
+    const prefix =
+      `${productId}-`;
+
+    const normalizedKeepPath =
+      normalizeStorePdfCachePath(
+        keepPath
+      );
+
+    for (const name of names) {
+      if (
+        !name.startsWith(
+          prefix
+        )
+      ) {
+        continue;
+      }
+
+      const path =
+        `${directory}/${name}`;
+
+      if (
+        normalizeStorePdfCachePath(
+          path
+        ) ===
+        normalizedKeepPath
+      ) {
+        continue;
+      }
+
+      await deleteStorePdfCacheFileIfExists(
+        path
+      );
+    }
+  } catch (error) {
+    console.warn(
+      "Cleanup versi cache PDF lama gagal:",
+      error
+    );
+  }
+}
+
+async function pruneStorePdfCacheDirectory(
+  directory: string,
+  maxFiles: number,
+  maxBytes: number,
+  preservePaths: string[]
+) {
+  try {
+    const directoryExists =
+      await ReactNativeBlobUtil
+        .fs
+        .exists(
+          directory
+        );
+
+    if (!directoryExists) {
+      return;
+    }
+
+    const names =
+      await ReactNativeBlobUtil
+        .fs
+        .ls(
+          directory
+        );
+
+    const preserve =
+      new Set(
+        preservePaths.map(
+          normalizeStorePdfCachePath
+        )
+      );
+
+    const entries:
+      StorePdfCacheEntry[] = [];
+
+    for (const name of names) {
+      const path =
+        `${directory}/${name}`;
+
+      try {
+        const stat =
+          await ReactNativeBlobUtil
+            .fs
+            .stat(
+              path
+            );
+
+        const sizeBytes =
+          Math.max(
+            0,
+            Number(
+              stat.size ?? 0
+            ) || 0
+          );
+
+        const statWithModifiedAt =
+          stat as unknown as {
+            lastModified?:
+              string | number | null;
+          };
+
+        entries.push({
+          path,
+          sizeBytes,
+          modifiedAt:
+            normalizeStorePdfCacheModifiedAt(
+              statWithModifiedAt
+                .lastModified
+            ),
+        });
+      } catch {
+        // File bisa berubah saat cleanup.
+      }
+    }
+
+    let totalFiles =
+      entries.length;
+
+    let totalBytes =
+      entries.reduce(
+        (
+          sum,
+          entry
+        ) =>
+          sum +
+          entry.sizeBytes,
+        0
+      );
+
+    const now =
+      Date.now();
+
+    const removable =
+      entries
+        .filter(
+          entry =>
+            !preserve.has(
+              normalizeStorePdfCachePath(
+                entry.path
+              )
+            )
+        )
+        .sort(
+          (a, b) =>
+            a.modifiedAt -
+            b.modifiedAt
+        );
+
+    for (const entry of removable) {
+      const expired =
+        entry.modifiedAt > 0 &&
+        now -
+          entry.modifiedAt >
+          STORE_PDF_CACHE_POLICY
+            .maxAgeMs;
+
+      const overLimit =
+        totalFiles > maxFiles ||
+        totalBytes > maxBytes;
+
+      if (
+        !expired &&
+        !overLimit
+      ) {
+        continue;
+      }
+
+      try {
+        await ReactNativeBlobUtil
+          .fs
+          .unlink(
+            entry.path
+          );
+
+        totalFiles =
+          Math.max(
+            0,
+            totalFiles - 1
+          );
+
+        totalBytes =
+          Math.max(
+            0,
+            totalBytes -
+              entry.sizeBytes
+          );
+      } catch (error) {
+        console.warn(
+          "Evict cache PDF gagal:",
+          error
+        );
+      }
+    }
+  } catch (error) {
+    console.warn(
+      "Prune cache PDF gagal:",
+      error
+    );
+  }
+}
 
 export default function ProductDetailScreen({
   product,
@@ -1100,7 +1421,13 @@ export default function ProductDetailScreen({
         const cachedPdfPath =
           `${pdfCacheDirectory}/${cacheFileName}`;
 
+        const pdfRenderCacheDirectory =
+          `${ReactNativeBlobUtil.fs.dirs.CacheDir}/` +
+          "diginaz-pdf-viewer";
+
         let cachedPdfReady = false;
+        let cachedPageCount:
+          number | null = null;
 
         try {
           const cacheExists =
@@ -1116,16 +1443,45 @@ export default function ProductDetailScreen({
                   cachedPdfPath
                 );
 
-            cachedPdfReady =
+            const cachedSize =
               Number(
                 cacheStat.size ?? 0
-              ) > 0;
+              );
+
+            if (cachedSize > 0) {
+              try {
+                const pageCount =
+                  await pdfViewer
+                    .getPageCount(
+                      cachedPdfPath
+                    );
+
+                if (pageCount > 0) {
+                  cachedPdfReady =
+                    true;
+
+                  cachedPageCount =
+                    pageCount;
+                }
+              } catch (
+                cacheValidationError
+              ) {
+                console.warn(
+                  "Cache PDF rusak, unduh ulang:",
+                  cacheValidationError
+                );
+              }
+            }
           }
         } catch {
           cachedPdfReady = false;
         }
 
         if (!cachedPdfReady) {
+          await deleteStorePdfCacheFileIfExists(
+            cachedPdfPath
+          );
+
           const cacheDirectoryExists =
             await ReactNativeBlobUtil.fs
               .exists(
@@ -1138,6 +1494,23 @@ export default function ProductDetailScreen({
                 pdfCacheDirectory
               );
           }
+
+          await removeSupersededProductPdfCacheFiles(
+            pdfCacheDirectory,
+            product.id,
+            cachedPdfPath
+          );
+
+          await pruneStorePdfCacheDirectory(
+            pdfCacheDirectory,
+            STORE_PDF_CACHE_POLICY
+              .originalMaxFiles,
+            STORE_PDF_CACHE_POLICY
+              .originalMaxBytes,
+            [
+              cachedPdfPath,
+            ]
+          );
 
           const signedPdfUrl =
             await createPrivateStoreMediaSignedUrl(
@@ -1152,15 +1525,50 @@ export default function ProductDetailScreen({
             );
           }
 
-          await ReactNativeBlobUtil
-            .config({
-              path:
-                cachedPdfPath,
-            })
-            .fetch(
-              "GET",
-              signedPdfUrl
+          try {
+            await ReactNativeBlobUtil
+              .config({
+                path:
+                  cachedPdfPath,
+              })
+              .fetch(
+                "GET",
+                signedPdfUrl
+              );
+          } catch (downloadError) {
+            await deleteStorePdfCacheFileIfExists(
+              cachedPdfPath
             );
+
+            throw downloadError;
+          }
+
+          try {
+            const freshPageCount =
+              await pdfViewer
+                .getPageCount(
+                  cachedPdfPath
+                );
+
+            if (
+              freshPageCount <= 0
+            ) {
+              throw new Error(
+                "PDF tidak memiliki halaman."
+              );
+            }
+
+            cachedPageCount =
+              freshPageCount;
+          } catch (
+            validationError
+          ) {
+            await deleteStorePdfCacheFileIfExists(
+              cachedPdfPath
+            );
+
+            throw validationError;
+          }
         }
 
         temporaryPdfPath =
@@ -1171,15 +1579,46 @@ export default function ProductDetailScreen({
         }
 
         const pageCount =
+          cachedPageCount ??
           await pdfViewer.getPageCount(
             temporaryPdfPath
           );
 
         if (pageCount <= 0) {
+          await deleteStorePdfCacheFileIfExists(
+            cachedPdfPath
+          );
+
           throw new Error(
             "PDF tidak memiliki halaman."
           );
         }
+
+        await removeSupersededProductPdfCacheFiles(
+          pdfCacheDirectory,
+          product.id,
+          cachedPdfPath
+        );
+
+        await pruneStorePdfCacheDirectory(
+          pdfCacheDirectory,
+          STORE_PDF_CACHE_POLICY
+            .originalMaxFiles,
+          STORE_PDF_CACHE_POLICY
+            .originalMaxBytes,
+          [
+            cachedPdfPath,
+          ]
+        );
+
+        await pruneStorePdfCacheDirectory(
+          pdfRenderCacheDirectory,
+          STORE_PDF_CACHE_POLICY
+            .renderedMaxFiles,
+          STORE_PDF_CACHE_POLICY
+            .renderedMaxBytes,
+          []
+        );
 
         const firstPage =
           await pdfViewer.renderPage(
@@ -1194,6 +1633,17 @@ export default function ProductDetailScreen({
 
         pdfRenderedPathsRef.current.add(
           firstPage.uri
+        );
+
+        void pruneStorePdfCacheDirectory(
+          pdfRenderCacheDirectory,
+          STORE_PDF_CACHE_POLICY
+            .renderedMaxFiles,
+          STORE_PDF_CACHE_POLICY
+            .renderedMaxBytes,
+          Array.from(
+            pdfRenderedPathsRef.current
+          )
         );
 
         setPdfLocalPath(
@@ -1307,6 +1757,21 @@ export default function ProductDetailScreen({
 
         pdfRenderedPathsRef.current.add(
           rendered.uri
+        );
+
+        const pdfRenderCacheDirectory =
+          `${ReactNativeBlobUtil.fs.dirs.CacheDir}/` +
+          "diginaz-pdf-viewer";
+
+        void pruneStorePdfCacheDirectory(
+          pdfRenderCacheDirectory,
+          STORE_PDF_CACHE_POLICY
+            .renderedMaxFiles,
+          STORE_PDF_CACHE_POLICY
+            .renderedMaxBytes,
+          Array.from(
+            pdfRenderedPathsRef.current
+          )
         );
 
         setPdfPageUrls(
