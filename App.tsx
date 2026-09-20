@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Dimensions,
   Image,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -111,6 +112,11 @@ function warmStoreCreatorAvatars(
     )
   );
 }
+
+const DIGINAZ_HEADER_LOGO =
+  Platform.OS === "android"
+    ? { uri: "diginaz_logo" }
+    : require("./assets/diginaz-logo.png");
 
 const SCREEN_WIDTH =
   Dimensions.get("window").width;
@@ -2537,7 +2543,13 @@ function StoreHome() {
           }
         >
           <View style={styles.header}>
-            <View>
+            <View style={styles.brandRow}>
+              <Image
+                source={DIGINAZ_HEADER_LOGO}
+                style={styles.brandLogo}
+                resizeMode="contain"
+              />
+
               <Text style={styles.brand}>
                 Diginaz
               </Text>
@@ -2776,6 +2788,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
+  },
+
+  brandRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+
+  brandLogo: {
+    width: 28,
+    height: 28,
+    marginTop: 2,
+    marginLeft: 2,
   },
 
   brand: {
