@@ -64,7 +64,7 @@ as $$
 
     where
       spr.product_key =
-      p.id
+      p.id::text
   ) review_summary
     on true
 
