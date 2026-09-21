@@ -33,6 +33,9 @@ import ReactNativeBlobUtil from "react-native-blob-util";
 
 import { supabase } from "../lib/supabase";
 import {
+  trackMediaObservabilityEvent,
+} from "../lib/mediaObservability";
+import {
   STORE_MEDIA_BUCKETS,
   STORE_MEDIA_UPLOAD_LIMITS,
   assertStoreMediaUploadSize,
@@ -741,6 +744,7 @@ type StoreDocumentUploadCancelRef = {
 const STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS =
   2;
 
+
 function getStoreDocumentUploadErrorStatus(
   error: unknown
 ): number | null {
@@ -797,6 +801,7 @@ function waitForStoreDocumentUploadRetry() {
 }
 
 async function uploadStoreDocumentNative(
+  productId: string,
   bucket: string,
   storagePath: string,
   asset: PickedAsset,
@@ -862,6 +867,9 @@ async function uploadStoreDocumentNative(
     limitKey,
     label
   );
+
+  const uploadStartedAt =
+    Date.now();
 
   let lastError: unknown =
     null;
@@ -1059,6 +1067,35 @@ async function uploadStoreDocumentNative(
 
         continue;
       }
+
+      void trackMediaObservabilityEvent({
+        eventType:
+          "upload_failed",
+        mediaScope:
+          "store_product",
+        productId,
+        bucket,
+        storagePath,
+        bytesTransferred: 0,
+        latencyMs:
+          Math.max(
+            Date.now() -
+              uploadStartedAt,
+            0
+          ),
+        source:
+          "upload_product",
+        metadata: {
+          label,
+          status:
+            errorStatus,
+          attempts:
+            attempt,
+          retry_exhausted:
+            attempt >=
+            STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS,
+        },
+      });
 
       throw error;
     }
@@ -2863,6 +2900,7 @@ export default function UploadProductScreen({
     try {
       const originalSizeBytes =
         await uploadStoreDocumentNative(
+          productId,
           STORE_MEDIA_BUCKETS.productOriginals,
           originalPath,
           wordAsset,
@@ -2881,6 +2919,7 @@ export default function UploadProductScreen({
 
       const previewSizeBytes =
         await uploadStoreDocumentNative(
+          productId,
           STORE_MEDIA_BUCKETS.productFiles,
           pdfPath,
           previewAsset,
@@ -3364,6 +3403,7 @@ export default function UploadProductScreen({
 
             const fileSizeBytes =
               await uploadStoreDocumentNative(
+                editProductId,
                 STORE_MEDIA_BUCKETS.productFiles,
                 filePath,
                 productFile,
@@ -4197,6 +4237,7 @@ export default function UploadProductScreen({
         ) {
           primarySizeBytes =
             await uploadStoreDocumentNative(
+              created.id,
               STORE_MEDIA_BUCKETS.productFiles,
               filePath,
               productFile,
