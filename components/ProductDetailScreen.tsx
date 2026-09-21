@@ -1351,51 +1351,13 @@ export default function ProductDetailScreen({
               ...pages.slice(1).map(() => null),
             ]);
 
-            // Preserve each page's slot even if a signing request fails.
-            await Promise.all(pages.slice(1).map(async (page, index) => {
-              const url = await pagePreview.getUrl(
-                product.id, page.storage_path, page.page_number
-              );
-
-              if (!active) return;
-
-              if (!url) {
-                setFailedProductImagePages(
-                  current => {
-                    const next =
-                      new Set(current);
-
-                    next.add(
-                      index + 1
-                    );
-
-                    return next;
-                  }
-                );
-
-                return;
-              }
-
-              setFailedProductImagePages(
-                current => {
-                  const next =
-                    new Set(current);
-
-                  next.delete(
-                    index + 1
-                  );
-
-                  return next;
-                }
-              );
-
-              setProductPageUrls(current => {
-                const next = [...current];
-                next[index + 1] = url;
-                return next;
-              });
-            }));
-            // Image loads pages 2+ after the first image settles. No second prefetch.
+            /*
+             * TRACK_P_LAZY_IMAGE_PAGE_URL_V1
+             *
+             * Jangan sign seluruh halaman di awal.
+             * Halaman aktif + satu halaman berikutnya
+             * akan disiapkan secara bertahap.
+             */
           }
         }
       } catch (error) {
@@ -1419,6 +1381,203 @@ export default function ProductDetailScreen({
       active = false;
     };
   }, [product.id, pagePreview]);
+
+  /*
+   * TRACK_P_LAZY_IMAGE_PAGE_URL_V1
+   *
+   * Untuk produk gambar, siapkan maksimal halaman
+   * aktif atau satu halaman sesudahnya.
+   *
+   * Metadata storage_path tetap berasal dari
+   * productPageRowsRef; yang ditunda hanya signed URL.
+   */
+  useEffect(() => {
+
+    const rows =
+      productPageRowsRef.current;
+
+
+    if (
+      rows.length === 0
+    ) {
+      return;
+    }
+
+
+    const currentReady =
+      Boolean(
+        productPageUrls[
+          activeProductSlide
+        ]
+      );
+
+
+    const targetIndex =
+      currentReady
+        ? activeProductSlide + 1
+        : activeProductSlide;
+
+
+    if (
+      targetIndex < 0 ||
+      targetIndex >= rows.length ||
+      productPageUrls[
+        targetIndex
+      ] ||
+      (
+        failedProductImagePages.has(
+          targetIndex
+        ) &&
+        !retryingProductImagePages.has(
+          targetIndex
+        )
+      )
+    ) {
+      return;
+    }
+
+
+    const page =
+      rows[
+        targetIndex
+      ];
+
+
+    if (
+      !page?.storage_path
+    ) {
+      return;
+    }
+
+
+    let active =
+      true;
+
+
+    void pagePreview
+      .getUrl(
+        product.id,
+        page.storage_path,
+        page.page_number
+      )
+      .then(
+        url => {
+
+          if (!active) {
+            return;
+          }
+
+
+          if (!url) {
+            setFailedProductImagePages(
+              current => {
+                const next =
+                  new Set(current);
+
+                next.add(
+                  targetIndex
+                );
+
+                return next;
+              }
+            );
+
+            return;
+          }
+
+
+          setFailedProductImagePages(
+            current => {
+              const next =
+                new Set(current);
+
+              next.delete(
+                targetIndex
+              );
+
+              return next;
+            }
+          );
+
+
+          setProductPageUrls(
+            current => {
+
+              if (
+                current[
+                  targetIndex
+                ] === url
+              ) {
+                return current;
+              }
+
+
+              const next =
+                [...current];
+
+              next[
+                targetIndex
+              ] =
+                url;
+
+              return next;
+            }
+          );
+
+
+          logA4(
+            "LAZY_PAGE_URL_READY",
+            product.id,
+            {
+              page:
+                targetIndex + 1,
+            }
+          );
+        }
+      )
+      .catch(
+        error => {
+
+          if (!active) {
+            return;
+          }
+
+
+          console.warn(
+            "Signed URL halaman produk gagal:",
+            error
+          );
+
+
+          setFailedProductImagePages(
+            current => {
+              const next =
+                new Set(current);
+
+              next.add(
+                targetIndex
+              );
+
+              return next;
+            }
+          );
+        }
+      );
+
+
+    return () => {
+      active = false;
+    };
+
+  }, [
+    product.id,
+    activeProductSlide,
+    productPageUrls,
+    failedProductImagePages,
+    retryingProductImagePages,
+    pagePreview,
+  ]);
+
 
   /*
    * PDF_VIEWER_V1
