@@ -49,8 +49,10 @@ import { warmCreatorAvatar } from "./lib/creatorAvatarPreview";
 import {
   fetchPublishedStoreProductById,
   fetchPublishedStoreProducts,
+  fetchAllPublishedStoreProducts,
   type StoreProductCardItem,
   type StoreFirstPage,
+  type StoreProductsCursor,
 } from "./lib/storeProducts";
 import {
   readStoreProductsCache,
@@ -983,6 +985,35 @@ function StoreHome() {
     useState<StoreProductCardItem[]>([]);
 
   const [
+    hasMoreProducts,
+    setHasMoreProducts,
+  ] = useState(false);
+
+  const [
+    loadingMoreProducts,
+    setLoadingMoreProducts,
+  ] = useState(false);
+
+  const [
+    catalogComplete,
+    setCatalogComplete,
+  ] = useState(false);
+
+  const nextProductsCursorRef =
+    useRef<StoreProductsCursor | null>(
+      null
+    );
+
+  const loadingMoreProductsRef =
+    useRef(false);
+
+  const fullCatalogLoadingRef =
+    useRef(false);
+
+  const paginationGenerationRef =
+    useRef(0);
+
+  const [
     storeUserId,
     setStoreUserId,
   ] =
@@ -1079,6 +1110,7 @@ function StoreHome() {
       );
 
   const preloadedSavedReady =
+    catalogComplete &&
     products.length > 0 &&
     products.every(
       product =>
@@ -1112,6 +1144,7 @@ function StoreHome() {
       : 0;
 
   const preloadedLikeReady =
+    catalogComplete &&
     Boolean(storeUserId) &&
     products
       .filter(
@@ -1639,9 +1672,21 @@ function StoreHome() {
 
   function handleFirstPagesReady(pages: StoreFirstPage[]) {
     if (!storeMountedRef.current) return;
-    setFirstPagePaths(Object.fromEntries(
-      pages.map(page => [page.id, page.firstPageStoragePath ?? null])
-    ));
+    setFirstPagePaths(
+      current => ({
+        ...current,
+
+        ...Object.fromEntries(
+          pages.map(
+            page => [
+              page.id,
+              page.firstPageStoragePath ??
+                null,
+            ]
+          )
+        ),
+      })
+    );
     // Start at product-query completion, before waiting for reviews.
     const selectedId = selectedProductRef.current?.id;
     const candidates = pages.filter(page => Boolean(page.firstPageStoragePath))
@@ -1829,6 +1874,14 @@ function StoreHome() {
 
     profileOpenPreparingRef.current =
       true;
+
+    /*
+     * Profile tetap dibuka instan.
+     * Katalog lengkap dilengkapi di background
+     * supaya My Products / Saved tidak berhenti
+     * hanya pada page Store yang sudah terlihat.
+     */
+    void ensureFullCatalog();
 
     /*
      * PROFILE_INSTANT_OPEN_V1
@@ -2034,79 +2087,393 @@ function StoreHome() {
   }, [selectedConversationId, editingProductId, selectedCommentsProduct, selectedProduct, selectedProfileUserId, profileReturnProduct, productOpenedFromProfile, showChatInbox, showNotifications, showProfile, showUpload]);
 
 
+  async function ensureFullCatalog() {
+    if (
+      catalogComplete ||
+      fullCatalogLoadingRef.current
+    ) {
+      return;
+    }
+
+
+    const generation =
+      ++paginationGenerationRef.current;
+
+
+    fullCatalogLoadingRef.current =
+      true;
+
+    setLoadingMoreProducts(
+      true
+    );
+
+
+    try {
+      const allProducts =
+        await fetchAllPublishedStoreProducts(
+          handleFirstPagesReady
+        );
+
+
+      if (
+        generation !==
+        paginationGenerationRef.current
+      ) {
+        return;
+      }
+
+
+      setProducts(
+        allProducts
+      );
+
+      nextProductsCursorRef.current =
+        null;
+
+      setHasMoreProducts(
+        false
+      );
+
+      setCatalogComplete(
+        true
+      );
+
+
+      warmStoreCreatorAvatars(
+        allProducts
+      );
+
+
+      await writeStoreProductsCache(
+        allProducts
+      );
+
+    } catch (error) {
+      console.warn(
+        "Katalog lengkap Store gagal dimuat:",
+        error
+      );
+
+    } finally {
+      fullCatalogLoadingRef.current =
+        false;
+
+
+      if (
+        generation ===
+        paginationGenerationRef.current
+      ) {
+        setLoadingMoreProducts(
+          false
+        );
+      }
+    }
+  }
+
+
   async function loadProducts(
     isRefresh = false
   ) {
-    let hasCachedProducts = false;
+    const generation =
+      ++paginationGenerationRef.current;
+
+    let hasCachedProducts =
+      false;
+
+
+    nextProductsCursorRef.current =
+      null;
+
+    setHasMoreProducts(
+      false
+    );
+
+    setCatalogComplete(
+      false
+    );
+
 
     if (isRefresh) {
-      setRefreshing(true);
+      setRefreshing(
+        true
+      );
+
+      setFirstPagePaths(
+        {}
+      );
+
     } else {
-      setLoadingProducts(true);
+      setLoadingProducts(
+        true
+      );
+
 
       const cachedProducts =
         await readStoreProductsCache();
-      logA4("STORE_CACHE", "store", {
-        count: cachedProducts?.length ?? 0,
-        withPath: cachedProducts?.filter(item => Boolean(item.firstPageStoragePath)).length ?? 0,
-      });
+
+
+      logA4(
+        "STORE_CACHE",
+        "store",
+        {
+          count:
+            cachedProducts
+              ?.length ?? 0,
+
+          withPath:
+            cachedProducts
+              ?.filter(
+                item =>
+                  Boolean(
+                    item.firstPageStoragePath
+                  )
+              )
+              .length ?? 0,
+        }
+      );
+
 
       if (
         cachedProducts &&
         cachedProducts.length > 0
       ) {
-        hasCachedProducts = true;
+        hasCachedProducts =
+          true;
+
 
         setProducts(
           cachedProducts
         );
 
+
         warmStoreCreatorAvatars(
           cachedProducts
         );
 
-        setLoadingProducts(false);
+
+        setLoadingProducts(
+          false
+        );
       }
     }
 
-    setStoreError("");
+
+    setStoreError(
+      ""
+    );
+
 
     try {
-      const mappedProducts =
-        await fetchPublishedStoreProducts(handleFirstPagesReady);
+      const firstPage =
+        await fetchPublishedStoreProducts(
+          null,
+          handleFirstPagesReady
+        );
+
+
+      if (
+        generation !==
+        paginationGenerationRef.current
+      ) {
+        return;
+      }
+
 
       setProducts(
-        mappedProducts
+        firstPage.items
       );
+
+
+      nextProductsCursorRef.current =
+        firstPage.nextCursor;
+
+
+      setHasMoreProducts(
+        firstPage.hasMore
+      );
+
+
+      setCatalogComplete(
+        !firstPage.hasMore
+      );
+
 
       warmStoreCreatorAvatars(
-        mappedProducts
+        firstPage.items
       );
 
+
       await writeStoreProductsCache(
-        mappedProducts
+        firstPage.items
       );
+
     } catch (error) {
       console.error(
         "Gagal memuat produk Store:",
         error
       );
 
-      if (!hasCachedProducts) {
+
+      if (
+        !hasCachedProducts
+      ) {
         setStoreError(
           error instanceof Error
             ? error.message
             : "Gagal memuat produk."
         );
       }
+
     } finally {
-      setLoadingProducts(false);
-      setRefreshing(false);
+      setLoadingProducts(
+        false
+      );
+
+      setRefreshing(
+        false
+      );
     }
   }
+
+
+  async function loadMoreProducts() {
+    if (
+      loadingMoreProductsRef.current ||
+      fullCatalogLoadingRef.current ||
+      !hasMoreProducts ||
+      !nextProductsCursorRef.current ||
+      searchQuery.trim().length > 0
+    ) {
+      return;
+    }
+
+
+    const generation =
+      paginationGenerationRef.current;
+
+    const cursor =
+      nextProductsCursorRef.current;
+
+
+    loadingMoreProductsRef.current =
+      true;
+
+    setLoadingMoreProducts(
+      true
+    );
+
+
+    try {
+      const page =
+        await fetchPublishedStoreProducts(
+          cursor,
+          handleFirstPagesReady
+        );
+
+
+      if (
+        generation !==
+          paginationGenerationRef.current ||
+        fullCatalogLoadingRef.current
+      ) {
+        return;
+      }
+
+
+      const knownIds =
+        new Set(
+          products.map(
+            product =>
+              product.id
+          )
+        );
+
+
+      const additions =
+        page.items.filter(
+          product =>
+            !knownIds.has(
+              product.id
+            )
+        );
+
+
+      const mergedProducts = [
+        ...products,
+        ...additions,
+      ];
+
+
+      setProducts(
+        mergedProducts
+      );
+
+
+      nextProductsCursorRef.current =
+        page.nextCursor;
+
+
+      setHasMoreProducts(
+        page.hasMore
+      );
+
+
+      setCatalogComplete(
+        !page.hasMore
+      );
+
+
+      warmStoreCreatorAvatars(
+        additions
+      );
+
+
+      await writeStoreProductsCache(
+        mergedProducts
+      );
+
+    } catch (error) {
+      console.warn(
+        "Page berikutnya Store gagal dimuat:",
+        error
+      );
+
+    } finally {
+      loadingMoreProductsRef.current =
+        false;
+
+      setLoadingMoreProducts(
+        false
+      );
+    }
+  }
+
+
   useEffect(() => {
-    loadProducts(false);
+    void loadProducts(
+      false
+    );
   }, []);
+
+
+  /*
+   * Search baseline sebelumnya mencari seluruh
+   * katalog yang sudah dimuat.
+   * Saat user mulai search, lengkapkan katalog
+   * on-demand agar hasil tidak hanya page pertama.
+   */
+  useEffect(() => {
+    if (
+      searchQuery.trim().length > 0 &&
+      !catalogComplete
+    ) {
+      void ensureFullCatalog();
+    }
+  }, [
+    searchQuery,
+    catalogComplete,
+  ]);
+
 
   const normalizedQuery =
     searchQuery.trim().toLowerCase();
@@ -2380,6 +2747,8 @@ function StoreHome() {
         onOpenCreatorProfile={(
           creatorUserId
         ) => {
+          void ensureFullCatalog();
+
           setProfileReturnProduct(
             selectedProduct
           );
@@ -2533,6 +2902,36 @@ function StoreHome() {
           contentContainerStyle={
             styles.scrollContent
           }
+          onScroll={({
+            nativeEvent,
+          }) => {
+            if (
+              searchQuery.trim()
+                .length > 0
+            ) {
+              return;
+            }
+
+            const remaining =
+              nativeEvent
+                .contentSize
+                .height -
+              (
+                nativeEvent
+                  .contentOffset
+                  .y +
+                nativeEvent
+                  .layoutMeasurement
+                  .height
+              );
+
+            if (
+              remaining < 480
+            ) {
+              void loadMoreProducts();
+            }
+          }}
+          scrollEventThrottle={160}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -2689,6 +3088,20 @@ function StoreHome() {
               )}
             </View>
           )}
+
+          {loadingMoreProducts &&
+          searchQuery.trim().length === 0 ? (
+            <View
+              style={
+                styles.storeLoadMore
+              }
+            >
+              <ActivityIndicator
+                size="small"
+                color="#2563EB"
+              />
+            </View>
+          ) : null}
         </ScrollView>
 
         {renderBottomNavigation(
@@ -3029,6 +3442,13 @@ const styles = StyleSheet.create({
   thumbnailImage: {
     width: "100%",
     height: "100%",
+  },
+
+  storeLoadMore: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 8,
   },
 
   storeStatus: {

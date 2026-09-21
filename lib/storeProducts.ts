@@ -297,150 +297,92 @@ export type StoreProductsCursor = {
 };
 
 
+export type StoreProductsPage = {
+  items: StoreProductCardItem[];
+  nextCursor: StoreProductsCursor | null;
+  hasMore: boolean;
+};
+
+
 export async function fetchPublishedStoreProducts(
+  cursor: StoreProductsCursor | null = null,
   onFirstPagesReady?: (pages: StoreFirstPage[]) => void
-): Promise<StoreProductCardItem[]> {
+): Promise<StoreProductsPage> {
   const productsStarted = Date.now();
 
   /*
-   * TRACK_P_CURSOR_FETCH_V1
+   * TRACK_P_TRUE_INCREMENTAL_V1
    *
-   * Pertahankan hasil akhir yang sama seperti
-   * baseline Store, tetapi jangan lagi meminta
-   * seluruh katalog dalam satu HTTP request.
-   *
-   * Cursor memakai created_at + id supaya urutan
-   * deterministik ketika timestamp sama.
+   * Satu pemanggilan = maksimal satu page.
+   * App yang menentukan kapan page berikutnya
+   * perlu diminta.
    */
-  const rows:
-    StoreProductRow[] = [];
-
-  let cursor:
-    StoreProductsCursor | null =
-      null;
-
-  let pageNumber =
-    0;
-
-
-  while (true) {
-    pageNumber += 1;
-
-    let pageQuery =
-      supabase
-        .from(
-          "store_products"
-        )
-        .select(
-          "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
-        )
-        .eq(
-          "status",
-          "published"
-        )
-        .order(
-          "created_at",
-          {
-            ascending: false,
-          }
-        )
-        .order(
-          "id",
-          {
-            ascending: false,
-          }
-        )
-        .limit(
-          STORE_PRODUCTS_PAGE_SIZE
-        );
-
-
-    if (cursor) {
-      pageQuery =
-        pageQuery.or(
-          `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`
-        );
-    }
-
-
-    const {
-      data: pageData,
-      error: pageError,
-    } =
-      await pageQuery;
-
-
-    if (pageError) {
-      throw pageError;
-    }
-
-
-    const pageRows =
-      (pageData ?? []) as unknown as
-        StoreProductRow[];
-
-
-    rows.push(
-      ...pageRows
-    );
-
-
-    logA4(
-      "STORE_PRODUCTS_PAGE_DONE",
-      "store",
-      {
-        page:
-          pageNumber,
-
-        count:
-          pageRows.length,
-
-        total:
-          rows.length,
-      }
-    );
-
-
-    if (
-      pageRows.length <
-      STORE_PRODUCTS_PAGE_SIZE
-    ) {
-      break;
-    }
-
-
-    const lastRow =
-      pageRows[
-        pageRows.length - 1
-      ];
-
-
-    const nextCursor:
-      StoreProductsCursor = {
-        createdAt:
-          lastRow.created_at,
-
-        id:
-          lastRow.id,
-      };
-
-
-    if (
-      cursor &&
-      cursor.createdAt ===
-        nextCursor.createdAt &&
-      cursor.id ===
-        nextCursor.id
-    ) {
-      throw new Error(
-        "Cursor Store tidak bergerak."
+  let pageQuery =
+    supabase
+      .from(
+        "store_products"
+      )
+      .select(
+        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
+      )
+      .eq(
+        "status",
+        "published"
+      )
+      .order(
+        "created_at",
+        {
+          ascending: false,
+        }
+      )
+      .order(
+        "id",
+        {
+          ascending: false,
+        }
+      )
+      .limit(
+        STORE_PRODUCTS_PAGE_SIZE
       );
-    }
 
 
-    cursor =
-      nextCursor;
+  if (cursor) {
+    pageQuery =
+      pageQuery.or(
+        `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`
+      );
   }
+
+
+  const {
+    data: pageData,
+    error: pageError,
+  } =
+    await pageQuery;
+
+
+  if (pageError) {
+    throw pageError;
+  }
+
+
+  const rows =
+    (pageData ?? []) as unknown as
+      StoreProductRow[];
+
+
+  logA4(
+    "STORE_PRODUCTS_PAGE_DONE",
+    "store",
+    {
+      count:
+        rows.length,
+
+      cursor:
+        Boolean(cursor),
+    }
+  );
+
 
   logA4("STORE_PRODUCTS_DONE", "store", {
     ms: Date.now() - productsStarted,
@@ -543,7 +485,8 @@ export async function fetchPublishedStoreProducts(
     );
   }
 
-  return rows.map(
+  const items =
+    rows.map(
     (row) => {
 
       const rating =
@@ -629,6 +572,79 @@ export async function fetchPublishedStoreProducts(
       };
     }
   );
+
+  const lastRow =
+    rows.length > 0
+      ? rows[
+          rows.length - 1
+        ]
+      : null;
+
+
+  const hasMore =
+    rows.length ===
+    STORE_PRODUCTS_PAGE_SIZE;
+
+
+  return {
+    items,
+
+    nextCursor:
+      hasMore &&
+      lastRow
+        ? {
+            createdAt:
+              lastRow.created_at,
+
+            id:
+              lastRow.id,
+          }
+        : null,
+
+    hasMore,
+  };
+}
+
+
+export async function fetchAllPublishedStoreProducts(
+  onFirstPagesReady?: (pages: StoreFirstPage[]) => void
+): Promise<StoreProductCardItem[]> {
+
+  const allProducts:
+    StoreProductCardItem[] = [];
+
+  let cursor:
+    StoreProductsCursor | null =
+      null;
+
+
+  while (true) {
+    const page =
+      await fetchPublishedStoreProducts(
+        cursor,
+        onFirstPagesReady
+      );
+
+
+    allProducts.push(
+      ...page.items
+    );
+
+
+    if (
+      !page.hasMore ||
+      !page.nextCursor
+    ) {
+      break;
+    }
+
+
+    cursor =
+      page.nextCursor;
+  }
+
+
+  return allProducts;
 }
 
 export async function fetchPublishedStoreProductById(
