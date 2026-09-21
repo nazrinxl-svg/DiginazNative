@@ -288,38 +288,159 @@ export function formatRupiah(
   return `Rp${formatted}`;
 }
 
+export const STORE_PRODUCTS_PAGE_SIZE =
+  20;
+
+export type StoreProductsCursor = {
+  createdAt: string;
+  id: string;
+};
+
+
 export async function fetchPublishedStoreProducts(
   onFirstPagesReady?: (pages: StoreFirstPage[]) => void
 ): Promise<StoreProductCardItem[]> {
   const productsStarted = Date.now();
 
-  const {
-    data: productData,
-    error: productError,
-  } =
-    await supabase
-      .from("store_products")
-      .select(
-        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
-      )
-      .eq(
-        "status",
-        "published"
-      )
-      .order(
-        "created_at",
-        {
-          ascending: false,
-        }
+  /*
+   * TRACK_P_CURSOR_FETCH_V1
+   *
+   * Pertahankan hasil akhir yang sama seperti
+   * baseline Store, tetapi jangan lagi meminta
+   * seluruh katalog dalam satu HTTP request.
+   *
+   * Cursor memakai created_at + id supaya urutan
+   * deterministik ketika timestamp sama.
+   */
+  const rows:
+    StoreProductRow[] = [];
+
+  let cursor:
+    StoreProductsCursor | null =
+      null;
+
+  let pageNumber =
+    0;
+
+
+  while (true) {
+    pageNumber += 1;
+
+    let pageQuery =
+      supabase
+        .from(
+          "store_products"
+        )
+        .select(
+          "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
+        )
+        .eq(
+          "status",
+          "published"
+        )
+        .order(
+          "created_at",
+          {
+            ascending: false,
+          }
+        )
+        .order(
+          "id",
+          {
+            ascending: false,
+          }
+        )
+        .limit(
+          STORE_PRODUCTS_PAGE_SIZE
+        );
+
+
+    if (cursor) {
+      pageQuery =
+        pageQuery.or(
+          `created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`
+        );
+    }
+
+
+    const {
+      data: pageData,
+      error: pageError,
+    } =
+      await pageQuery;
+
+
+    if (pageError) {
+      throw pageError;
+    }
+
+
+    const pageRows =
+      (pageData ?? []) as unknown as
+        StoreProductRow[];
+
+
+    rows.push(
+      ...pageRows
+    );
+
+
+    logA4(
+      "STORE_PRODUCTS_PAGE_DONE",
+      "store",
+      {
+        page:
+          pageNumber,
+
+        count:
+          pageRows.length,
+
+        total:
+          rows.length,
+      }
+    );
+
+
+    if (
+      pageRows.length <
+      STORE_PRODUCTS_PAGE_SIZE
+    ) {
+      break;
+    }
+
+
+    const lastRow =
+      pageRows[
+        pageRows.length - 1
+      ];
+
+
+    const nextCursor:
+      StoreProductsCursor = {
+        createdAt:
+          lastRow.created_at,
+
+        id:
+          lastRow.id,
+      };
+
+
+    if (
+      cursor &&
+      cursor.createdAt ===
+        nextCursor.createdAt &&
+      cursor.id ===
+        nextCursor.id
+    ) {
+      throw new Error(
+        "Cursor Store tidak bergerak."
       );
+    }
 
-  if (productError) {
-    throw productError;
+
+    cursor =
+      nextCursor;
   }
-
-  const rows =
-    (productData ?? []) as unknown as
-      StoreProductRow[];
 
   logA4("STORE_PRODUCTS_DONE", "store", {
     ms: Date.now() - productsStarted,
