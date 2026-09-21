@@ -45,6 +45,10 @@ import {
   supabase,
 } from "../lib/supabase";
 
+import {
+  trackMediaObservabilityEvent,
+} from "../lib/mediaObservability";
+
 import type {
   StoreProductCardItem,
 } from "../lib/storeProducts";
@@ -1691,6 +1695,25 @@ const [
       if (uploadError) {
         throw uploadError;
       }
+
+      void trackMediaObservabilityEvent({
+        eventType:
+          "upload_success",
+        mediaScope:
+          "avatar",
+        bucket:
+          "profile-avatars",
+        storagePath:
+          uploadedPath,
+        bytesTransferred:
+          arrayBuffer.byteLength,
+        source:
+          "profile_avatar",
+        metadata: {
+          mime_type:
+            mimeType,
+        },
+      });
 
 
       const {

@@ -47,6 +47,10 @@ import {
 } from "../lib/supabase";
 
 import {
+  trackMediaObservabilityEvent,
+} from "../lib/mediaObservability";
+
+import {
   readChatMessagesLocal,
   replaceChatMessagesLocal,
 } from "../lib/chatMessagesLocal";
@@ -1142,6 +1146,25 @@ export default function ChatScreen({
         if (uploadError) {
           throw uploadError;
         }
+
+        void trackMediaObservabilityEvent({
+          eventType:
+            "upload_success",
+          mediaScope:
+            "chat_attachment",
+          bucket:
+            "store-chat-files",
+          storagePath:
+            uploadedPath,
+          bytesTransferred:
+            uploadedSizeBytes ?? 0,
+          source:
+            "chat_upload",
+          metadata: {
+            mime_type:
+              attachment.mimeType ?? null,
+          },
+        });
       }
 
       const {

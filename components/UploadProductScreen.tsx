@@ -800,6 +800,37 @@ function waitForStoreDocumentUploadRetry() {
   );
 }
 
+function trackStoreProductUploadSuccess(input: {
+  productId: string;
+  bucket: string;
+  storagePath: string;
+  bytesTransferred: number;
+  latencyMs?: number | null;
+  metadata?: Record<string, unknown>;
+}) {
+  void trackMediaObservabilityEvent({
+    eventType:
+      "upload_success",
+    mediaScope:
+      "store_product",
+    productId:
+      input.productId,
+    bucket:
+      input.bucket,
+    storagePath:
+      input.storagePath,
+    bytesTransferred:
+      input.bytesTransferred,
+    latencyMs:
+      input.latencyMs ?? null,
+    source:
+      "upload_product",
+    metadata:
+      input.metadata ?? {},
+  });
+}
+
+
 async function uploadStoreDocumentNative(
   productId: string,
   bucket: string,
@@ -978,6 +1009,30 @@ async function uploadStoreDocumentNative(
         status >= 200 &&
         status < 300
       ) {
+        trackStoreProductUploadSuccess({
+          productId,
+          bucket,
+          storagePath,
+          bytesTransferred:
+            Math.trunc(
+              sizeBytes
+            ),
+          latencyMs:
+            Math.max(
+              Date.now() -
+                uploadStartedAt,
+              0
+            ),
+          metadata: {
+            label,
+            status,
+            attempts:
+              attempt,
+            retried:
+              attempt > 1,
+          },
+        });
+
         return Math.trunc(
           sizeBytes
         );
@@ -1861,6 +1916,21 @@ export default function UploadProductScreen({
           throw uploadError;
         }
 
+        trackStoreProductUploadSuccess({
+          productId,
+          bucket:
+            STORE_MEDIA_BUCKETS.productFiles,
+          storagePath,
+          bytesTransferred:
+            buffer.byteLength,
+          metadata: {
+            media_kind:
+              "image",
+            role:
+              "page",
+          },
+        });
+
         uploadedExtras.push(
           storagePath
         );
@@ -2181,6 +2251,21 @@ export default function UploadProductScreen({
           if (uploadError) {
             throw uploadError;
           }
+
+          trackStoreProductUploadSuccess({
+            productId,
+            bucket:
+              STORE_MEDIA_BUCKETS.productFiles,
+            storagePath,
+            bytesTransferred:
+              buffer.byteLength,
+            metadata: {
+              media_kind:
+                "image",
+              role:
+                "page",
+            },
+          });
 
           uploadedPaths.push(
             storagePath
@@ -3212,6 +3297,23 @@ export default function UploadProductScreen({
             throw thumbnailError;
           }
 
+          trackStoreProductUploadSuccess({
+            productId:
+              editProductId,
+            bucket:
+              STORE_MEDIA_BUCKETS.thumbnails,
+            storagePath:
+              thumbnailPath,
+            bytesTransferred:
+              thumbnailBuffer.byteLength,
+            metadata: {
+              media_kind:
+                "image",
+              role:
+                "thumbnail",
+            },
+          });
+
         updateUploadProgress(20);
 
           const stagedThumbnailChange =
@@ -4069,6 +4171,23 @@ export default function UploadProductScreen({
           throw thumbnailError;
         }
 
+        trackStoreProductUploadSuccess({
+          productId:
+            created.id,
+          bucket:
+            STORE_MEDIA_BUCKETS.thumbnails,
+          storagePath:
+            thumbnailPath,
+          bytesTransferred:
+            thumbnailBuffer.byteLength,
+          metadata: {
+            media_kind:
+              "image",
+            role:
+              "thumbnail",
+          },
+        });
+
         const thumbnailMediaAssetId =
           await registerStoreProductMediaAsset({
             ownerUserId:
@@ -4278,6 +4397,23 @@ export default function UploadProductScreen({
           if (fileError) {
             throw fileError;
           }
+
+          trackStoreProductUploadSuccess({
+            productId:
+              created.id,
+            bucket:
+              STORE_MEDIA_BUCKETS.productFiles,
+            storagePath:
+              filePath,
+            bytesTransferred:
+              fileBuffer.byteLength,
+            metadata: {
+              media_kind:
+                "image",
+              role:
+                "page",
+            },
+          });
 
           primarySizeBytes =
             fileBuffer.byteLength;
