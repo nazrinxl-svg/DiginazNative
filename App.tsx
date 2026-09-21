@@ -1983,6 +1983,29 @@ function StoreHome() {
   function openMainTab(
     tab: MainTab
   ) {
+
+    /*
+     * PRODUCT_DETAIL_HOME_TO_DASHBOARD_V1
+     *
+     * Tombol Home selalu kembali ke Store utama,
+     * bukan mempertahankan state search sebelumnya.
+     */
+    if (
+      tab === "store"
+    ) {
+      setSearchQuery(
+        ""
+      );
+
+      setSearchSuggestions(
+        []
+      );
+
+      suppressSuggestionForRef.current =
+        "";
+    }
+
+
     setShowChatInbox(
       tab === "chat"
     );
@@ -3142,7 +3165,17 @@ function StoreHome() {
 
   if (selectedProduct) {
     return (
-      <ProductDetailScreen
+      <View
+        style={
+          styles.screen
+        }
+      >
+        <View
+          style={
+            styles.mainTabContent
+          }
+        >
+          <ProductDetailScreen
         key={selectedProduct.id}
         initialCurrentUserId={storeUserId}
         product={{
@@ -3200,6 +3233,12 @@ function StoreHome() {
           )
         }
       />
+        </View>
+
+        {renderBottomNavigation(
+          "store"
+        )}
+      </View>
     );
   }
 
