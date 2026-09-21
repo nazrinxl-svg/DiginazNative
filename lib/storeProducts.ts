@@ -58,9 +58,20 @@ export type StoreProductRow = {
   }> | null;
 };
 
-type StoreReviewRow = {
-  product_key: string;
-  rating: number;
+type StoreProductCardSummaryRow = {
+  product_id: string;
+  page_count: number | string | null;
+  first_page_storage_path: string | null;
+  rating_average: number | string | null;
+  review_count: number | string | null;
+};
+
+
+type StoreProductCardSummary = {
+  pageCount: number;
+  firstPageStoragePath: string | null;
+  rating: string;
+  reviewCount: number;
 };
 
 
@@ -68,6 +79,98 @@ type StoreCreatorAvatarRow = {
   auth_user_id: string;
   avatar_url: string | null;
 };
+
+
+async function fetchStoreProductCardSummaryMap(
+  productIds: string[]
+): Promise<
+  Map<string, StoreProductCardSummary>
+> {
+
+  if (
+    productIds.length === 0
+  ) {
+    return new Map();
+  }
+
+
+  const {
+    data,
+    error,
+  } =
+    await supabase
+      .rpc(
+        "get_store_product_card_summaries",
+        {
+          target_product_ids:
+            productIds,
+        }
+      );
+
+
+  if (error) {
+    throw error;
+  }
+
+
+  const rows =
+    (data ?? []) as unknown as
+      StoreProductCardSummaryRow[];
+
+
+  return new Map(
+    rows.map(
+      row => {
+
+        const ratingValue =
+          Number(
+            row.rating_average ??
+              0
+          );
+
+
+        return [
+          row.product_id,
+          {
+            pageCount:
+              Math.max(
+                0,
+                Number(
+                  row.page_count ??
+                    0
+                )
+              ),
+
+            firstPageStoragePath:
+              String(
+                row.first_page_storage_path ??
+                  ""
+              ).trim() ||
+              null,
+
+            rating:
+              Number.isFinite(
+                ratingValue
+              )
+                ? ratingValue.toFixed(
+                    1
+                  )
+                : "0.0",
+
+            reviewCount:
+              Math.max(
+                0,
+                Number(
+                  row.review_count ??
+                    0
+                )
+              ),
+          },
+        ] as const;
+      }
+    )
+  );
+}
 
 
 async function fetchStoreCreatorAvatarMap(
@@ -323,7 +426,7 @@ export async function fetchPublishedStoreProducts(
         "store_products"
       )
       .select(
-        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at,store_product_pages(page_number,storage_path)"
+        "id,creator_user_id,creator_name,title,product_type,subject,class_level,pricing_type,price_amount,thumbnail_path,download_count,created_at"
       )
       .eq(
         "status",
@@ -388,16 +491,26 @@ export async function fetchPublishedStoreProducts(
     ms: Date.now() - productsStarted,
     count: rows.length,
   });
-  onFirstPagesReady?.(rows.map(row => ({
-    id: row.id,
-    firstPageStoragePath: row.store_product_pages
-      ?.find(page => page.page_number === 1)?.storage_path ?? null,
-  })));
+
 
   const productIds =
     rows.map(
-      (row) => row.id
+      row =>
+        row.id
     );
+
+
+  /*
+   * TRACK_P_CARD_SUMMARY_V1
+   *
+   * Mobile menerima satu summary row per produk,
+   * bukan seluruh page rows + review rows.
+   */
+  const cardSummaryMapPromise =
+    fetchStoreProductCardSummaryMap(
+      productIds
+    );
+
 
   const creatorAvatarMapPromise =
     fetchStoreCreatorAvatarMap(
@@ -407,40 +520,27 @@ export async function fetchPublishedStoreProducts(
       )
     );
 
-  const reviewsStarted = Date.now();
-  let reviewRows:
-    StoreReviewRow[] = [];
 
-  if (
-    productIds.length > 0
-  ) {
+  const cardSummaryMap =
+    await cardSummaryMapPromise;
 
-    const {
-      data: reviewData,
-      error: reviewError,
-    } =
-      await supabase
-        .from(
-          "store_product_reviews"
-        )
-        .select(
-          "product_key,rating"
-        )
-        .in(
-          "product_key",
-          productIds
-        );
 
-    if (reviewError) {
-      throw reviewError;
-    }
+  onFirstPagesReady?.(
+    rows.map(
+      row => ({
+        id:
+          row.id,
 
-    reviewRows =
-      (reviewData ?? []) as unknown as
-        StoreReviewRow[];
-  }
+        firstPageStoragePath:
+          cardSummaryMap.get(
+            row.id
+          )
+            ?.firstPageStoragePath ??
+          null,
+      })
+    )
+  );
 
-  logA4("STORE_REVIEWS_DONE", "store", { ms: Date.now() - reviewsStarted });
 
   const creatorAvatarMap =
     await creatorAvatarMapPromise;
@@ -451,56 +551,19 @@ export async function fetchPublishedStoreProducts(
       creatorAvatarMap
     );
 
-  const ratingMap =
-    new Map<
-      string,
-      {
-        sum: number;
-        count: number;
-      }
-    >();
-
-  for (
-    const review of reviewRows
-  ) {
-
-    const current =
-      ratingMap.get(
-        review.product_key
-      ) ?? {
-        sum: 0,
-        count: 0,
-      };
-
-    current.sum +=
-      Number(
-        review.rating
-      );
-
-    current.count += 1;
-
-    ratingMap.set(
-      review.product_key,
-      current
-    );
-  }
 
   const items =
     rows.map(
     (row) => {
 
-      const rating =
-        ratingMap.get(
+      const summary =
+        cardSummaryMap.get(
           row.id
         );
 
       const firstPageStoragePath =
-        row.store_product_pages
-          ?.find(
-            page =>
-              page.page_number === 1
-          )
-          ?.storage_path ??
+        summary
+          ?.firstPageStoragePath ??
         null;
 
       const thumbnailUrl =
@@ -539,16 +602,13 @@ export async function fetchPublishedStoreProducts(
           row.creator_name,
 
         rating:
-          rating &&
-          rating.count > 0
-            ? (
-                rating.sum /
-                rating.count
-              ).toFixed(1)
-            : "0.0",
+          summary?.rating ??
+          "0.0",
 
         reviewCount:
-          rating?.count ?? 0,
+          summary
+            ?.reviewCount ??
+          0,
 
         price:
           row.pricing_type ===
@@ -562,8 +622,10 @@ export async function fetchPublishedStoreProducts(
 
         firstPageStoragePath,
 
-    pageCount:
-      row.store_product_pages?.length ?? 0,
+        pageCount:
+          summary
+            ?.pageCount ??
+          0,
         downloadCount:
           Number(
             row.download_count ??
