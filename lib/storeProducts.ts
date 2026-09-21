@@ -67,6 +67,26 @@ type StoreProductCardSummaryRow = {
 };
 
 
+type StoreSearchRow = {
+  id: string;
+  creator_user_id: string;
+  creator_name: string;
+  title: string;
+  product_type: string;
+  subject: string;
+  class_level: string;
+  pricing_type: string;
+  price_amount: number | string | null;
+  thumbnail_path: string | null;
+  download_count: number | string | null;
+  created_at: string;
+  page_count: number | string | null;
+  first_page_storage_path: string | null;
+  rating_average: number | string | null;
+  review_count: number | string | null;
+};
+
+
 type StoreProductCardSummary = {
   pageCount: number;
   firstPageStoragePath: string | null;
@@ -634,6 +654,247 @@ export async function fetchPublishedStoreProducts(
       };
     }
   );
+
+  const lastRow =
+    rows.length > 0
+      ? rows[
+          rows.length - 1
+        ]
+      : null;
+
+
+  const hasMore =
+    rows.length ===
+    STORE_PRODUCTS_PAGE_SIZE;
+
+
+  return {
+    items,
+
+    nextCursor:
+      hasMore &&
+      lastRow
+        ? {
+            createdAt:
+              lastRow.created_at,
+
+            id:
+              lastRow.id,
+          }
+        : null,
+
+    hasMore,
+  };
+}
+
+
+export async function searchPublishedStoreProducts(
+  searchQuery: string,
+  cursor: StoreProductsCursor | null = null,
+  onFirstPagesReady?: (pages: StoreFirstPage[]) => void
+): Promise<StoreProductsPage> {
+
+  const normalizedQuery =
+    searchQuery.trim();
+
+
+  if (!normalizedQuery) {
+    return {
+      items: [],
+      nextCursor: null,
+      hasMore: false,
+    };
+  }
+
+
+  const {
+    data,
+    error,
+  } =
+    await supabase.rpc(
+      "search_store_products_v1",
+      {
+        search_query:
+          normalizedQuery,
+
+        cursor_created_at:
+          cursor?.createdAt ??
+          null,
+
+        cursor_id:
+          cursor?.id ??
+          null,
+
+        page_size:
+          STORE_PRODUCTS_PAGE_SIZE,
+      }
+    );
+
+
+  if (error) {
+    throw error;
+  }
+
+
+  const rows =
+    (data ?? []) as unknown as
+      StoreSearchRow[];
+
+
+  logA4(
+    "STORE_SEARCH_PAGE_DONE",
+    "store",
+    {
+      query:
+        normalizedQuery,
+
+      count:
+        rows.length,
+
+      cursor:
+        Boolean(cursor),
+    }
+  );
+
+
+  onFirstPagesReady?.(
+    rows.map(
+      row => ({
+        id:
+          row.id,
+
+        firstPageStoragePath:
+          String(
+            row.first_page_storage_path ??
+              ""
+          ).trim() ||
+          null,
+      })
+    )
+  );
+
+
+  const creatorAvatarMap =
+    await fetchStoreCreatorAvatarMap(
+      rows.map(
+        row =>
+          row.creator_user_id
+      )
+    );
+
+
+  const creatorAvatarDisplayMap =
+    await buildCreatorAvatarDisplayMap(
+      creatorAvatarMap
+    );
+
+
+  const items =
+    rows.map(
+      row => {
+
+        const ratingValue =
+          Number(
+            row.rating_average ??
+              0
+          );
+
+
+        const thumbnailUrl =
+          row.thumbnail_path
+            ? getPublicStoreMediaUrl(
+                STORE_MEDIA_BUCKETS.thumbnails,
+                row.thumbnail_path
+              )
+            : null;
+
+
+        return {
+          id:
+            row.id,
+
+          creatorUserId:
+            row.creator_user_id,
+
+          creatorAvatarUrl:
+            creatorAvatarDisplayMap.get(
+              row.creator_user_id
+            ) ?? null,
+
+          type:
+            row.product_type,
+
+          subject:
+            row.subject,
+
+          level:
+            row.class_level,
+
+          title:
+            row.title,
+
+          author:
+            row.creator_name,
+
+          rating:
+            Number.isFinite(
+              ratingValue
+            )
+              ? ratingValue.toFixed(
+                  1
+                )
+              : "0.0",
+
+          reviewCount:
+            Math.max(
+              0,
+              Number(
+                row.review_count ??
+                  0
+              )
+            ),
+
+          price:
+            row.pricing_type ===
+            "free"
+              ? "Gratis"
+              : formatRupiah(
+                  Number(
+                    row.price_amount ??
+                      0
+                  )
+                ),
+
+          thumbnailUrl,
+
+          firstPageStoragePath:
+            String(
+              row.first_page_storage_path ??
+                ""
+            ).trim() ||
+            null,
+
+          pageCount:
+            Math.max(
+              0,
+              Number(
+                row.page_count ??
+                  0
+              )
+            ),
+
+          downloadCount:
+            Math.max(
+              0,
+              Number(
+                row.download_count ??
+                  0
+              )
+            ),
+        };
+      }
+    );
+
 
   const lastRow =
     rows.length > 0

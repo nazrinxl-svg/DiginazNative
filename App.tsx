@@ -50,6 +50,7 @@ import {
   fetchPublishedStoreProductById,
   fetchPublishedStoreProducts,
   fetchAllPublishedStoreProducts,
+  searchPublishedStoreProducts,
   type StoreProductCardItem,
   type StoreFirstPage,
   type StoreProductsCursor,
@@ -1089,12 +1090,58 @@ function StoreHome() {
       >
     >({});
 
+  const [
+    searchProducts,
+    setSearchProducts,
+  ] =
+    useState<
+      StoreProductCardItem[]
+    >([]);
+
+  const searchProductsRef =
+    useRef<
+      StoreProductCardItem[]
+    >([]);
+
+  searchProductsRef.current =
+    searchProducts;
+
+  const [
+    loadingSearch,
+    setLoadingSearch,
+  ] = useState(false);
+
+  const [
+    searchError,
+    setSearchError,
+  ] = useState("");
+
+  const [
+    hasMoreSearchProducts,
+    setHasMoreSearchProducts,
+  ] = useState(false);
+
+  const nextSearchCursorRef =
+    useRef<StoreProductsCursor | null>(
+      null
+    );
+
+  const searchGenerationRef =
+    useRef(0);
+
+
   const storeProductIdsKey =
-    products
-      .map(
-        product => product.id
+    Array.from(
+      new Set(
+        [
+          ...products,
+          ...searchProducts,
+        ].map(
+          product =>
+            product.id
+        )
       )
-      .join("|");
+    ).join("|");
 
   const preloadedSavedProductIds =
     products
@@ -2457,43 +2504,287 @@ function StoreHome() {
 
 
   /*
-   * Search baseline sebelumnya mencari seluruh
-   * katalog yang sudah dimuat.
-   * Saat user mulai search, lengkapkan katalog
-   * on-demand agar hasil tidak hanya page pertama.
+   * TRACK_P_SERVER_SEARCH_V1
+   *
+   * Search tidak lagi melengkapi seluruh katalog.
+   * Query dilakukan server-side, 20 produk/page,
+   * dengan cursor created_at + id.
    */
   useEffect(() => {
-    if (
-      searchQuery.trim().length > 0 &&
-      !catalogComplete
-    ) {
-      void ensureFullCatalog();
+
+    const normalizedQuery =
+      searchQuery.trim();
+
+    const generation =
+      ++searchGenerationRef.current;
+
+
+    if (!normalizedQuery) {
+
+      nextSearchCursorRef.current =
+        null;
+
+      searchProductsRef.current =
+        [];
+
+      setSearchProducts(
+        []
+      );
+
+      setHasMoreSearchProducts(
+        false
+      );
+
+      setLoadingSearch(
+        false
+      );
+
+      setSearchError(
+        ""
+      );
+
+      return;
     }
+
+
+    setLoadingSearch(
+      true
+    );
+
+    setSearchError(
+      ""
+    );
+
+    nextSearchCursorRef.current =
+      null;
+
+    setHasMoreSearchProducts(
+      false
+    );
+
+
+    const timer =
+      setTimeout(
+        () => {
+
+          void searchPublishedStoreProducts(
+            normalizedQuery,
+            null,
+            handleFirstPagesReady
+          )
+            .then(
+              page => {
+
+                if (
+                  generation !==
+                  searchGenerationRef.current
+                ) {
+                  return;
+                }
+
+
+                searchProductsRef.current =
+                  page.items;
+
+                setSearchProducts(
+                  page.items
+                );
+
+                nextSearchCursorRef.current =
+                  page.nextCursor;
+
+                setHasMoreSearchProducts(
+                  page.hasMore
+                );
+
+                warmStoreCreatorAvatars(
+                  page.items
+                );
+              }
+            )
+            .catch(
+              error => {
+
+                if (
+                  generation !==
+                  searchGenerationRef.current
+                ) {
+                  return;
+                }
+
+
+                console.warn(
+                  "Pencarian Store gagal:",
+                  error
+                );
+
+                searchProductsRef.current =
+                  [];
+
+                setSearchProducts(
+                  []
+                );
+
+                setSearchError(
+                  error instanceof Error
+                    ? error.message
+                    : "Pencarian produk gagal."
+                );
+              }
+            )
+            .finally(
+              () => {
+
+                if (
+                  generation ===
+                  searchGenerationRef.current
+                ) {
+                  setLoadingSearch(
+                    false
+                  );
+                }
+              }
+            );
+        },
+        250
+      );
+
+
+    return () => {
+      clearTimeout(
+        timer
+      );
+    };
+
   }, [
     searchQuery,
-    catalogComplete,
   ]);
 
 
+  async function loadMoreSearchProducts() {
+
+    const normalizedQuery =
+      searchQuery.trim();
+
+
+    if (
+      !normalizedQuery ||
+      loadingMoreProductsRef.current ||
+      !hasMoreSearchProducts ||
+      !nextSearchCursorRef.current
+    ) {
+      return;
+    }
+
+
+    const generation =
+      searchGenerationRef.current;
+
+    const cursor =
+      nextSearchCursorRef.current;
+
+
+    loadingMoreProductsRef.current =
+      true;
+
+    setLoadingMoreProducts(
+      true
+    );
+
+
+    try {
+
+      const page =
+        await searchPublishedStoreProducts(
+          normalizedQuery,
+          cursor,
+          handleFirstPagesReady
+        );
+
+
+      if (
+        generation !==
+        searchGenerationRef.current
+      ) {
+        return;
+      }
+
+
+      const current =
+        searchProductsRef.current;
+
+      const knownIds =
+        new Set(
+          current.map(
+            product =>
+              product.id
+          )
+        );
+
+
+      const additions =
+        page.items.filter(
+          product =>
+            !knownIds.has(
+              product.id
+            )
+        );
+
+
+      const merged = [
+        ...current,
+        ...additions,
+      ];
+
+
+      searchProductsRef.current =
+        merged;
+
+      setSearchProducts(
+        merged
+      );
+
+      nextSearchCursorRef.current =
+        page.nextCursor;
+
+      setHasMoreSearchProducts(
+        page.hasMore
+      );
+
+      warmStoreCreatorAvatars(
+        additions
+      );
+
+    } catch (error) {
+
+      console.warn(
+        "Page search berikutnya gagal:",
+        error
+      );
+
+    } finally {
+
+      loadingMoreProductsRef.current =
+        false;
+
+      setLoadingMoreProducts(
+        false
+      );
+    }
+  }
+
+
   const normalizedQuery =
-    searchQuery.trim().toLowerCase();
+    searchQuery
+      .trim()
+      .toLowerCase();
+
 
   const visibleProducts =
     normalizedQuery.length === 0
       ? products
-      : products.filter((product) =>
-          [
-            product.title,
-            product.type,
-            product.subject,
-            product.level,
-            product.author,
-          ].some((value) =>
-            value
-              .toLowerCase()
-              .includes(normalizedQuery)
-          )
-        );
+      : searchProducts;
+
 
   async function openNotificationProduct(
     productId: string
@@ -2905,12 +3196,6 @@ function StoreHome() {
           onScroll={({
             nativeEvent,
           }) => {
-            if (
-              searchQuery.trim()
-                .length > 0
-            ) {
-              return;
-            }
 
             const remaining =
               nativeEvent
@@ -2925,10 +3210,18 @@ function StoreHome() {
                   .height
               );
 
+
             if (
               remaining < 480
             ) {
-              void loadMoreProducts();
+              if (
+                searchQuery.trim()
+                  .length > 0
+              ) {
+                void loadMoreSearchProducts();
+              } else {
+                void loadMoreProducts();
+              }
             }
           }}
           scrollEventThrottle={160}
@@ -3001,7 +3294,11 @@ function StoreHome() {
             />
           </View>
 
-          {loadingProducts ? (
+          {(
+            normalizedQuery.length > 0
+              ? loadingSearch
+              : loadingProducts
+          ) ? (
             <View style={styles.storeStatus}>
               <ActivityIndicator
                 size="small"
@@ -3012,10 +3309,16 @@ function StoreHome() {
                 Memuat produk...
               </Text>
             </View>
-          ) : storeError ? (
+          ) : (
+            normalizedQuery.length > 0
+              ? searchError
+              : storeError
+          ) ? (
             <View style={styles.storeStatus}>
               <Text style={styles.storeErrorText}>
-                Produk belum dapat dimuat.
+                {normalizedQuery.length > 0
+                  ? "Pencarian belum dapat dimuat."
+                  : "Produk belum dapat dimuat."}
               </Text>
 
               <Pressable
@@ -3089,8 +3392,7 @@ function StoreHome() {
             </View>
           )}
 
-          {loadingMoreProducts &&
-          searchQuery.trim().length === 0 ? (
+          {loadingMoreProducts ? (
             <View
               style={
                 styles.storeLoadMore
