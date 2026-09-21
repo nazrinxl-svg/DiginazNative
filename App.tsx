@@ -51,9 +51,12 @@ import {
   fetchPublishedStoreProducts,
   fetchAllPublishedStoreProducts,
   searchPublishedStoreProducts,
+  fetchStoreSearchSuggestions,
   type StoreProductCardItem,
   type StoreFirstPage,
   type StoreProductsCursor,
+  type StoreSearchCursor,
+  type StoreSearchSuggestion,
 } from "./lib/storeProducts";
 import {
   readStoreProductsCache,
@@ -1122,12 +1125,26 @@ function StoreHome() {
   ] = useState(false);
 
   const nextSearchCursorRef =
-    useRef<StoreProductsCursor | null>(
+    useRef<StoreSearchCursor | null>(
       null
     );
 
   const searchGenerationRef =
     useRef(0);
+
+  const [
+    searchSuggestions,
+    setSearchSuggestions,
+  ] =
+    useState<
+      StoreSearchSuggestion[]
+    >([]);
+
+  const searchSuggestionGenerationRef =
+    useRef(0);
+
+  const suppressSuggestionForRef =
+    useRef("");
 
 
   const storeProductIdsKey =
@@ -2661,6 +2678,105 @@ function StoreHome() {
   ]);
 
 
+  /*
+   * TRACK_P_SEARCH_SUGGESTIONS_V1
+   *
+   * Suggestion terpisah dari hasil produk.
+   * Minimal 2 karakter dan debounce singkat.
+   */
+  useEffect(() => {
+
+    const normalizedQuery =
+      searchQuery.trim();
+
+    const generation =
+      ++searchSuggestionGenerationRef.current;
+
+
+    if (
+      normalizedQuery.length < 2
+    ) {
+      setSearchSuggestions(
+        []
+      );
+
+      return;
+    }
+
+
+    if (
+      suppressSuggestionForRef.current ===
+      normalizedQuery.toLowerCase()
+    ) {
+      setSearchSuggestions(
+        []
+      );
+
+      return;
+    }
+
+
+    const timer =
+      setTimeout(
+        () => {
+
+          void fetchStoreSearchSuggestions(
+            normalizedQuery,
+            8
+          )
+            .then(
+              suggestions => {
+
+                if (
+                  generation !==
+                  searchSuggestionGenerationRef.current
+                ) {
+                  return;
+                }
+
+
+                setSearchSuggestions(
+                  suggestions
+                );
+              }
+            )
+            .catch(
+              error => {
+
+                if (
+                  generation !==
+                  searchSuggestionGenerationRef.current
+                ) {
+                  return;
+                }
+
+
+                console.warn(
+                  "Suggestion Store gagal:",
+                  error
+                );
+
+                setSearchSuggestions(
+                  []
+                );
+              }
+            );
+        },
+        180
+      );
+
+
+    return () => {
+      clearTimeout(
+        timer
+      );
+    };
+
+  }, [
+    searchQuery,
+  ]);
+
+
   async function loadMoreSearchProducts() {
 
     const normalizedQuery =
@@ -3286,13 +3402,106 @@ function StoreHome() {
             <TextInput
               style={styles.searchInput}
               value={searchQuery}
-              onChangeText={setSearchQuery}
+              onChangeText={value => {
+                suppressSuggestionForRef.current =
+                  "";
+
+                setSearchQuery(
+                  value
+                );
+              }}
               placeholder="Cari produk Diginaz... LIVE"
               placeholderTextColor="#94A3B8"
               returnKeyType="search"
               autoCorrect={false}
             />
           </View>
+
+          {searchSuggestions.length > 0 ? (
+            <View
+              style={
+                styles.searchSuggestionsBox
+              }
+            >
+              {searchSuggestions.map(
+                (
+                  suggestion,
+                  index
+                ) => (
+                  <Pressable
+                    key={
+                      suggestion.kind +
+                      ":" +
+                      suggestion.value
+                    }
+                    style={[
+                      styles.searchSuggestionRow,
+                      index ===
+                        searchSuggestions.length -
+                          1 &&
+                        styles.searchSuggestionRowLast,
+                    ]}
+                    onPress={() => {
+
+                      suppressSuggestionForRef.current =
+                        suggestion.value
+                          .trim()
+                          .toLowerCase();
+
+                      setSearchSuggestions(
+                        []
+                      );
+
+                      setSearchQuery(
+                        suggestion.value
+                      );
+                    }}
+                  >
+                    <View
+                      style={
+                        styles.searchSuggestionMain
+                      }
+                    >
+                      <Search
+                        size={15}
+                        color="#64748B"
+                        strokeWidth={1.8}
+                      />
+
+                      <Text
+                        style={
+                          styles.searchSuggestionText
+                        }
+                        numberOfLines={1}
+                      >
+                        {suggestion.value}
+                      </Text>
+                    </View>
+
+                    <Text
+                      style={
+                        styles.searchSuggestionKind
+                      }
+                    >
+                      {suggestion.kind ===
+                      "title"
+                        ? "Produk"
+                        : suggestion.kind ===
+                            "subject"
+                          ? "Mapel"
+                          : suggestion.kind ===
+                              "type"
+                            ? "Jenis"
+                            : suggestion.kind ===
+                                "level"
+                              ? "Kelas"
+                              : "Kreator"}
+                    </Text>
+                  </Pressable>
+                )
+              )}
+            </View>
+          ) : null}
 
           {(
             normalizedQuery.length > 0
@@ -3601,6 +3810,51 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: "#0F172A",
     paddingVertical: 0,
+  },
+
+  searchSuggestionsBox: {
+    marginTop: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+
+  searchSuggestionRow: {
+    minHeight: 42,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F1F5F9",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+
+  searchSuggestionRowLast: {
+    borderBottomWidth: 0,
+  },
+
+  searchSuggestionMain: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+
+  searchSuggestionText: {
+    flex: 1,
+    fontFamily: "PlusJakartaSans_500Medium",
+    fontSize: 12,
+    color: "#0F172A",
+  },
+
+  searchSuggestionKind: {
+    fontFamily: "PlusJakartaSans_500Medium",
+    fontSize: 10,
+    color: "#64748B",
   },
 
   productGrid: {

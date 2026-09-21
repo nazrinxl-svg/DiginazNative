@@ -80,10 +80,18 @@ type StoreSearchRow = {
   thumbnail_path: string | null;
   download_count: number | string | null;
   created_at: string;
+  rank_score: number | string;
   page_count: number | string | null;
   first_page_storage_path: string | null;
   rating_average: number | string | null;
   review_count: number | string | null;
+};
+
+
+type StoreSearchSuggestionRow = {
+  suggestion: string;
+  suggestion_kind: string;
+  rank_score: number | string;
 };
 
 
@@ -420,6 +428,31 @@ export type StoreProductsCursor = {
 };
 
 
+export type StoreSearchCursor = {
+  score: string;
+  createdAt: string;
+  id: string;
+};
+
+
+export type StoreSearchSuggestion = {
+  value: string;
+  kind:
+    | "title"
+    | "subject"
+    | "type"
+    | "level"
+    | "creator";
+};
+
+
+export type StoreSearchPage = {
+  items: StoreProductCardItem[];
+  nextCursor: StoreSearchCursor | null;
+  hasMore: boolean;
+};
+
+
 export type StoreProductsPage = {
   items: StoreProductCardItem[];
   nextCursor: StoreProductsCursor | null;
@@ -690,9 +723,9 @@ export async function fetchPublishedStoreProducts(
 
 export async function searchPublishedStoreProducts(
   searchQuery: string,
-  cursor: StoreProductsCursor | null = null,
+  cursor: StoreSearchCursor | null = null,
   onFirstPagesReady?: (pages: StoreFirstPage[]) => void
-): Promise<StoreProductsPage> {
+): Promise<StoreSearchPage> {
 
   const normalizedQuery =
     searchQuery.trim();
@@ -712,10 +745,14 @@ export async function searchPublishedStoreProducts(
     error,
   } =
     await supabase.rpc(
-      "search_store_products_v1",
+      "search_store_products_v2",
       {
         search_query:
           normalizedQuery,
+
+        cursor_score:
+          cursor?.score ??
+          null,
 
         cursor_created_at:
           cursor?.createdAt ??
@@ -916,6 +953,11 @@ export async function searchPublishedStoreProducts(
       hasMore &&
       lastRow
         ? {
+            score:
+              String(
+                lastRow.rank_score
+              ),
+
             createdAt:
               lastRow.created_at,
 
@@ -926,6 +968,100 @@ export async function searchPublishedStoreProducts(
 
     hasMore,
   };
+}
+
+
+export async function fetchStoreSearchSuggestions(
+  searchQuery: string,
+  limit = 8
+): Promise<StoreSearchSuggestion[]> {
+
+  const normalizedQuery =
+    searchQuery.trim();
+
+
+  if (
+    normalizedQuery.length < 2
+  ) {
+    return [];
+  }
+
+
+  const {
+    data,
+    error,
+  } =
+    await supabase.rpc(
+      "suggest_store_search_v1",
+      {
+        search_query:
+          normalizedQuery,
+
+        suggestion_limit:
+          Math.min(
+            12,
+            Math.max(
+              1,
+              limit
+            )
+          ),
+      }
+    );
+
+
+  if (error) {
+    throw error;
+  }
+
+
+  const rows =
+    (data ?? []) as unknown as
+      StoreSearchSuggestionRow[];
+
+
+  return rows
+    .map(
+      row => {
+
+        const value =
+          String(
+            row.suggestion ??
+              ""
+          ).trim();
+
+
+        const rawKind =
+          String(
+            row.suggestion_kind ??
+              ""
+          );
+
+
+        const kind:
+          StoreSearchSuggestion["kind"] =
+            rawKind === "subject"
+              ? "subject"
+              : rawKind === "type"
+                ? "type"
+                : rawKind === "level"
+                  ? "level"
+                  : rawKind === "creator"
+                    ? "creator"
+                    : "title";
+
+
+        return {
+          value,
+          kind,
+        };
+      }
+    )
+    .filter(
+      item =>
+        Boolean(
+          item.value
+        )
+    );
 }
 
 
