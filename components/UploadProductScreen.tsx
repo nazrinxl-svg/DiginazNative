@@ -1375,6 +1375,152 @@ function trackStoreProductUploadSuccess(input: {
 }
 
 
+async function cleanupStoreProductThumbnailOrphans(
+  ownerUserId: string,
+  productId: string,
+  keepStoragePath:
+    string | null
+): Promise<number> {
+  const folder =
+    `${ownerUserId}/${productId}`;
+
+  const keepPath =
+    keepStoragePath
+      ?.trim() ??
+    "";
+
+  const discoveredPaths:
+    string[] = [];
+
+  const pageSize = 100;
+
+  for (
+    let offset = 0;
+    offset < 1000;
+    offset += pageSize
+  ) {
+    const {
+      data,
+      error,
+    } = await supabase.storage
+      .from(
+        STORE_MEDIA_BUCKETS
+          .thumbnails
+      )
+      .list(
+        folder,
+        {
+          limit:
+            pageSize,
+          offset,
+          sortBy: {
+            column:
+              "name",
+            order:
+              "asc",
+          },
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    const page =
+      data ?? [];
+
+    for (
+      const item of page
+    ) {
+      const name =
+        String(
+          item.name ?? ""
+        ).trim();
+
+      /*
+       * Folder placeholder tidak memiliki id.
+       * Cleanup hanya file thumbnail langsung.
+       */
+      if (
+        !item.id ||
+        !name ||
+        !name.startsWith(
+          "thumbnail-"
+        )
+      ) {
+        continue;
+      }
+
+      const storagePath =
+        `${folder}/${name}`;
+
+      if (
+        keepPath &&
+        storagePath ===
+          keepPath
+      ) {
+        continue;
+      }
+
+      discoveredPaths.push(
+        storagePath
+      );
+    }
+
+    if (
+      page.length <
+      pageSize
+    ) {
+      break;
+    }
+  }
+
+  const stalePaths =
+    Array.from(
+      new Set(
+        discoveredPaths
+      )
+    );
+
+  if (
+    stalePaths.length === 0
+  ) {
+    return 0;
+  }
+
+  for (
+    let index = 0;
+    index <
+      stalePaths.length;
+    index += 100
+  ) {
+    const batch =
+      stalePaths.slice(
+        index,
+        index + 100
+      );
+
+    const {
+      error:
+        removeError,
+    } = await supabase.storage
+      .from(
+        STORE_MEDIA_BUCKETS
+          .thumbnails
+      )
+      .remove(
+        batch
+      );
+
+    if (removeError) {
+      throw removeError;
+    }
+  }
+
+  return stalePaths.length;
+}
+
+
 async function uploadStoreDocumentNative(
   ownerUserId: string,
   productId: string,
@@ -5112,6 +5258,32 @@ export default function UploadProductScreen({
           }
         }
 
+        try {
+          const removedThumbnailOrphans =
+            await cleanupStoreProductThumbnailOrphans(
+              user.id,
+              editProductId,
+              nextThumbnailPath
+            );
+
+          if (
+            removedThumbnailOrphans >
+            0
+          ) {
+            console.log(
+              "Thumbnail orphan edit dibersihkan:",
+              removedThumbnailOrphans
+            );
+          }
+        } catch (
+          thumbnailCleanupError
+        ) {
+          console.warn(
+            "Cleanup orphan thumbnail edit gagal:",
+            thumbnailCleanupError
+          );
+        }
+
         updateUploadProgress(100);
 
         setMessage(
@@ -5513,6 +5685,32 @@ export default function UploadProductScreen({
               );
             }
           }
+        }
+
+        try {
+          const removedRecoveryThumbnails =
+            await cleanupStoreProductThumbnailOrphans(
+              user.id,
+              created.id,
+              null
+            );
+
+          if (
+            removedRecoveryThumbnails >
+            0
+          ) {
+            console.log(
+              "Thumbnail orphan recovery dibersihkan:",
+              removedRecoveryThumbnails
+            );
+          }
+        } catch (
+          recoveryThumbnailCleanupError
+        ) {
+          console.warn(
+            "Cleanup orphan thumbnail recovery gagal:",
+            recoveryThumbnailCleanupError
+          );
         }
       }
 
@@ -5933,6 +6131,32 @@ export default function UploadProductScreen({
 
       if (publishError) {
         throw publishError;
+      }
+
+      try {
+        const removedThumbnailOrphans =
+          await cleanupStoreProductThumbnailOrphans(
+            user.id,
+            created.id,
+            thumbnailPath
+          );
+
+        if (
+          removedThumbnailOrphans >
+          0
+        ) {
+          console.log(
+            "Thumbnail orphan publish dibersihkan:",
+            removedThumbnailOrphans
+          );
+        }
+      } catch (
+        thumbnailCleanupError
+      ) {
+        console.warn(
+          "Cleanup orphan thumbnail publish gagal:",
+          thumbnailCleanupError
+        );
       }
 
       updateUploadProgress(100);
