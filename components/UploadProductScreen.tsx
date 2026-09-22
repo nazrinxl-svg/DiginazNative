@@ -30,6 +30,7 @@ import { ImagePickerCompat as ImagePicker } from "../lib/nativePickers";
 import { DocumentPickerCompat as DocumentPicker } from "../lib/nativePickers";
 import { pdfViewer } from "../lib/pdfViewer";
 import ReactNativeBlobUtil from "react-native-blob-util";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { supabase } from "../lib/supabase";
 import {
@@ -741,8 +742,156 @@ type StoreDocumentUploadCancelRef = {
   current: boolean;
 };
 
-const STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS =
-  2;
+/*
+ * M4_NATIVE_TUS_RESUMABLE_V1
+ *
+ * Tidak membaca seluruh dokumen ke JS memory.
+ * File dipotong secara native menjadi chunk 6 MB,
+ * lalu dikirim melalui Supabase Storage TUS.
+ */
+const STORE_DOCUMENT_TUS_CHUNK_SIZE =
+  6 * 1024 * 1024;
+
+const STORE_DOCUMENT_TUS_MAX_ATTEMPTS =
+  5;
+
+const STORE_DOCUMENT_TUS_RETRY_DELAYS = [
+  0,
+  1000,
+  3000,
+  5000,
+  10000,
+];
+
+const STORE_DOCUMENT_TUS_RESUME_PREFIX =
+  "@diginaz/store-document-tus/v1:";
+
+
+function getStoreDocumentTusEndpoint() {
+  const supabaseUrl =
+    String(
+      process.env.SUPABASE_URL ??
+        ""
+    )
+      .trim()
+      .replace(/\/+$/, "");
+
+  if (!supabaseUrl) {
+    throw new Error(
+      "SUPABASE_URL belum tersedia."
+    );
+  }
+
+  const projectMatch =
+    supabaseUrl.match(
+      /^https:\/\/([^.]+)\.supabase\.co$/i
+    );
+
+  if (projectMatch?.[1]) {
+    return (
+      "https://" +
+      projectMatch[1] +
+      ".storage.supabase.co" +
+      "/storage/v1/upload/resumable"
+    );
+  }
+
+  return (
+    supabaseUrl +
+    "/storage/v1/upload/resumable"
+  );
+}
+
+
+function getStoreDocumentTusResumeKey(
+  productId: string,
+  bucket: string,
+  storagePath: string,
+  sizeBytes: number
+) {
+  return (
+    STORE_DOCUMENT_TUS_RESUME_PREFIX +
+    [
+      productId,
+      bucket,
+      storagePath,
+      Math.trunc(sizeBytes),
+    ].join(":")
+  );
+}
+
+
+function getStoreTusHeader(
+  headers: unknown,
+  name: string
+): string | null {
+  if (
+    !headers ||
+    typeof headers !== "object"
+  ) {
+    return null;
+  }
+
+  const target =
+    name.toLowerCase();
+
+  for (
+    const [
+      key,
+      value,
+    ] of Object.entries(
+      headers as Record<
+        string,
+        unknown
+      >
+    )
+  ) {
+    if (
+      key.toLowerCase() ===
+      target
+    ) {
+      return value == null
+        ? null
+        : String(value);
+    }
+  }
+
+  return null;
+}
+
+
+function resolveStoreTusLocation(
+  endpoint: string,
+  location: string
+) {
+  if (
+    /^https?:\/\//i.test(
+      location
+    )
+  ) {
+    return location;
+  }
+
+  const origin =
+    endpoint.match(
+      /^https?:\/\/[^/]+/i
+    )?.[0];
+
+  if (!origin) {
+    throw new Error(
+      "Origin Storage TUS tidak valid."
+    );
+  }
+
+  return (
+    origin +
+    (
+      location.startsWith("/")
+        ? location
+        : "/" + location
+    )
+  );
+}
 
 
 function getStoreDocumentUploadErrorStatus(
@@ -771,16 +920,39 @@ function getStoreDocumentUploadErrorStatus(
   const status =
     Number(candidate);
 
-  return Number.isFinite(status)
+  return Number.isFinite(
+    status
+  )
     ? status
     : null;
 }
 
-function isRetryableStoreDocumentUploadStatus(
+
+function createStoreTusHttpError(
+  message: string,
+  status: number
+) {
+  const error =
+    new Error(
+      message
+    ) as Error & {
+      statusCode?: number;
+    };
+
+  error.statusCode =
+    status;
+
+  return error;
+}
+
+
+function isRetryableStoreTusStatus(
   status: number
 ) {
   return (
     status === 408 ||
+    status === 409 ||
+    status === 423 ||
     status === 429 ||
     (
       status >= 500 &&
@@ -789,16 +961,202 @@ function isRetryableStoreDocumentUploadStatus(
   );
 }
 
-function waitForStoreDocumentUploadRetry() {
-  return new Promise<void>(
+
+async function waitForStoreTusRetry(
+  attempt: number
+) {
+  const delay =
+    STORE_DOCUMENT_TUS_RETRY_DELAYS[
+      Math.min(
+        attempt,
+        STORE_DOCUMENT_TUS_RETRY_DELAYS.length -
+          1
+      )
+    ] ?? 1000;
+
+  if (delay <= 0) {
+    return;
+  }
+
+  await new Promise<void>(
     resolve => {
       setTimeout(
         resolve,
-        450
+        delay
       );
     }
   );
 }
+
+
+function buildStoreTusMetadata(
+  bucket: string,
+  storagePath: string,
+  contentType: string
+) {
+  const encode =
+    (value: string) =>
+      ReactNativeBlobUtil
+        .base64
+        .encode(value);
+
+  return [
+    "bucketName " +
+      encode(bucket),
+    "objectName " +
+      encode(storagePath),
+    "contentType " +
+      encode(contentType),
+    "cacheControl " +
+      encode("3600"),
+  ].join(",");
+}
+
+
+async function createStoreTusSession(
+  endpoint: string,
+  accessToken: string,
+  apiKey: string,
+  bucket: string,
+  storagePath: string,
+  contentType: string,
+  sizeBytes: number
+) {
+  const response =
+    await ReactNativeBlobUtil.fetch(
+      "POST",
+      endpoint,
+      {
+        Authorization:
+          `Bearer ${accessToken}`,
+        apikey:
+          apiKey,
+        "Tus-Resumable":
+          "1.0.0",
+        "Upload-Length":
+          String(
+            Math.trunc(
+              sizeBytes
+            )
+          ),
+        "Upload-Metadata":
+          buildStoreTusMetadata(
+            bucket,
+            storagePath,
+            contentType
+          ),
+        "x-upsert":
+          "false",
+        "Cache-Control":
+          "no-store",
+      },
+      ""
+    );
+
+  const status =
+    Number(
+      response.info().status
+    );
+
+  if (
+    !Number.isFinite(status) ||
+    status < 200 ||
+    status >= 300
+  ) {
+    throw createStoreTusHttpError(
+      `Membuat session upload gagal (${status}).`,
+      status
+    );
+  }
+
+  const location =
+    getStoreTusHeader(
+      response.info().headers,
+      "location"
+    );
+
+  if (!location) {
+    throw new Error(
+      "Storage TUS tidak mengembalikan Location."
+    );
+  }
+
+  return resolveStoreTusLocation(
+    endpoint,
+    location
+  );
+}
+
+
+async function readStoreTusOffset(
+  uploadUrl: string,
+  accessToken: string,
+  apiKey: string
+): Promise<number | null> {
+  const response =
+    await ReactNativeBlobUtil.fetch(
+      "HEAD",
+      uploadUrl,
+      {
+        Authorization:
+          `Bearer ${accessToken}`,
+        apikey:
+          apiKey,
+        "Tus-Resumable":
+          "1.0.0",
+        "Cache-Control":
+          "no-store",
+      }
+    );
+
+  const status =
+    Number(
+      response.info().status
+    );
+
+  if (
+    status === 404 ||
+    status === 410
+  ) {
+    return null;
+  }
+
+  if (
+    !Number.isFinite(status) ||
+    status < 200 ||
+    status >= 300
+  ) {
+    throw createStoreTusHttpError(
+      `Membaca offset upload gagal (${status}).`,
+      status
+    );
+  }
+
+  const offsetHeader =
+    getStoreTusHeader(
+      response.info().headers,
+      "upload-offset"
+    );
+
+  const offset =
+    Number(
+      offsetHeader
+    );
+
+  if (
+    !Number.isFinite(offset) ||
+    offset < 0
+  ) {
+    throw new Error(
+      "Upload-Offset TUS tidak valid."
+    );
+  }
+
+  return Math.trunc(
+    offset
+  );
+}
+
 
 function trackStoreProductUploadSuccess(input: {
   productId: string;
@@ -842,7 +1200,11 @@ async function uploadStoreDocumentNative(
   uploadTaskRef:
     StoreDocumentUploadTaskRef,
   cancelRequestedRef:
-    StoreDocumentUploadCancelRef
+    StoreDocumentUploadCancelRef,
+  onByteProgress?: (
+    bytesUploaded: number,
+    bytesTotal: number
+  ) => void
 ): Promise<number> {
   if (
     asset.sizeBytes != null
@@ -899,54 +1261,122 @@ async function uploadStoreDocumentNative(
     label
   );
 
+  const {
+    data: {
+      session,
+    },
+    error: sessionError,
+  } =
+    await supabase.auth.getSession();
+
+  if (
+    sessionError ||
+    !session?.access_token
+  ) {
+    throw (
+      sessionError ??
+      new Error(
+        "Sesi upload tidak tersedia."
+      )
+    );
+  }
+
+  const apiKey =
+    String(
+      process.env
+        .SUPABASE_PUBLISHABLE_KEY ??
+        ""
+    ).trim();
+
+  if (!apiKey) {
+    throw new Error(
+      "SUPABASE_PUBLISHABLE_KEY belum tersedia."
+    );
+  }
+
+  const accessToken =
+    session.access_token;
+
+  const endpoint =
+    getStoreDocumentTusEndpoint();
+
+  const resumeKey =
+    getStoreDocumentTusResumeKey(
+      productId,
+      bucket,
+      storagePath,
+      sizeBytes
+    );
+
   const uploadStartedAt =
     Date.now();
 
-  let lastError: unknown =
-    null;
+  let uploadUrl =
+    await AsyncStorage.getItem(
+      resumeKey
+    );
 
-  for (
-    let attempt = 1;
-    attempt <=
-      STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS;
-    attempt += 1
-  ) {
-    if (
-      cancelRequestedRef.current
-    ) {
-      throw new Error(
-        `Upload ${label} dibatalkan.`
-      );
-    }
+  let offset = 0;
+  let resumed = false;
+  let completedChunks = 0;
 
-    try {
-      const {
-        data,
-        error,
-      } =
-        await supabase.storage
-          .from(
-            bucket
-          )
-          .createSignedUploadUrl(
-            storagePath,
-            {
-              upsert: false,
-            }
-          );
-
-      if (error) {
-        throw error;
-      }
+  try {
+    if (uploadUrl) {
+      const savedOffset =
+        await readStoreTusOffset(
+          uploadUrl,
+          accessToken,
+          apiKey
+        );
 
       if (
-        !data?.signedUrl
+        savedOffset == null ||
+        savedOffset >
+          sizeBytes
       ) {
-        throw new Error(
-          `URL upload ${label} belum tersedia.`
+        await AsyncStorage.removeItem(
+          resumeKey
         );
-      }
 
+        uploadUrl = null;
+      } else {
+        offset =
+          savedOffset;
+
+        resumed =
+          offset > 0;
+      }
+    }
+
+    if (!uploadUrl) {
+      uploadUrl =
+        await createStoreTusSession(
+          endpoint,
+          accessToken,
+          apiKey,
+          bucket,
+          storagePath,
+          contentType,
+          sizeBytes
+        );
+
+      await AsyncStorage.setItem(
+        resumeKey,
+        uploadUrl
+      );
+
+      offset = 0;
+    }
+
+    onByteProgress?.(
+      offset,
+      sizeBytes
+    );
+
+    while (
+      offset <
+      sizeBytes
+    ) {
       if (
         cancelRequestedRef.current
       ) {
@@ -955,174 +1385,442 @@ async function uploadStoreDocumentNative(
         );
       }
 
-      const uploadTask =
+      const chunkStart =
+        offset;
+
+      const chunkEnd =
+        Math.min(
+          chunkStart +
+            STORE_DOCUMENT_TUS_CHUNK_SIZE,
+          sizeBytes
+        );
+
+      const chunkPath =
         ReactNativeBlobUtil
-          .fetch(
-            "PUT",
-            data.signedUrl,
-            {
-              "Content-Type":
-                contentType,
-              "Cache-Control":
-                "max-age=3600",
-              "x-upsert":
-                "false",
-            },
-            ReactNativeBlobUtil.wrap(
-              localPath
-            )
-          );
+          .fs
+          .dirs
+          .CacheDir +
+        `/diginaz-tus-${productId}-${chunkStart}-${Date.now()}.part`;
 
-      uploadTaskRef.current =
-        uploadTask;
+      await ReactNativeBlobUtil
+        .fs
+        .slice(
+          localPath,
+          chunkPath,
+          chunkStart,
+          chunkEnd
+        );
 
-      let response: any;
+      let chunkAccepted =
+        false;
+
+      let resynced =
+        false;
 
       try {
-        response =
-          await uploadTask;
-      } finally {
-        if (
-          uploadTaskRef.current ===
-            uploadTask
+        for (
+          let attempt = 0;
+          attempt <
+          STORE_DOCUMENT_TUS_MAX_ATTEMPTS;
+          attempt += 1
         ) {
-          uploadTaskRef.current =
-            null;
+          if (
+            cancelRequestedRef.current
+          ) {
+            throw new Error(
+              `Upload ${label} dibatalkan.`
+            );
+          }
+
+          try {
+            const uploadTask =
+              ReactNativeBlobUtil.fetch(
+                "PATCH",
+                uploadUrl,
+                {
+                  Authorization:
+                    `Bearer ${accessToken}`,
+                  apikey:
+                    apiKey,
+                  "Tus-Resumable":
+                    "1.0.0",
+                  "Upload-Offset":
+                    String(
+                      chunkStart
+                    ),
+                  "Content-Type":
+                    "application/offset+octet-stream",
+                  "Cache-Control":
+                    "no-store",
+                },
+                ReactNativeBlobUtil.wrap(
+                  chunkPath
+                )
+              );
+
+            uploadTaskRef.current =
+              uploadTask;
+
+            uploadTask.uploadProgress(
+              {
+                interval:
+                  150,
+              },
+              sent => {
+                const sentBytes =
+                  Math.min(
+                    Math.max(
+                      Number(sent) ||
+                        0,
+                      0
+                    ),
+                    chunkEnd -
+                      chunkStart
+                  );
+
+                onByteProgress?.(
+                  Math.min(
+                    chunkStart +
+                      sentBytes,
+                    sizeBytes
+                  ),
+                  sizeBytes
+                );
+              }
+            );
+
+            let response: any;
+
+            try {
+              response =
+                await uploadTask;
+            } finally {
+              if (
+                uploadTaskRef.current ===
+                uploadTask
+              ) {
+                uploadTaskRef.current =
+                  null;
+              }
+            }
+
+            const status =
+              Number(
+                response
+                  .info()
+                  .status
+              );
+
+            if (
+              status === 404 ||
+              status === 410
+            ) {
+              await AsyncStorage
+                .removeItem(
+                  resumeKey
+                );
+
+              uploadUrl =
+                await createStoreTusSession(
+                  endpoint,
+                  accessToken,
+                  apiKey,
+                  bucket,
+                  storagePath,
+                  contentType,
+                  sizeBytes
+                );
+
+              await AsyncStorage
+                .setItem(
+                  resumeKey,
+                  uploadUrl
+                );
+
+              offset = 0;
+              resumed = true;
+              resynced = true;
+              break;
+            }
+
+            if (
+              status >= 200 &&
+              status < 300
+            ) {
+              const responseOffset =
+                Number(
+                  getStoreTusHeader(
+                    response
+                      .info()
+                      .headers,
+                    "upload-offset"
+                  )
+                );
+
+              if (
+                Number.isFinite(
+                  responseOffset
+                ) &&
+                responseOffset >=
+                  chunkEnd
+              ) {
+                offset =
+                  Math.min(
+                    Math.trunc(
+                      responseOffset
+                    ),
+                    sizeBytes
+                  );
+              } else {
+                const verifiedOffset =
+                  await readStoreTusOffset(
+                    uploadUrl,
+                    accessToken,
+                    apiKey
+                  );
+
+                if (
+                  verifiedOffset ==
+                  null
+                ) {
+                  throw new Error(
+                    "Session TUS hilang setelah PATCH."
+                  );
+                }
+
+                offset =
+                  verifiedOffset;
+              }
+
+              completedChunks +=
+                1;
+
+              chunkAccepted =
+                true;
+
+              onByteProgress?.(
+                offset,
+                sizeBytes
+              );
+
+              break;
+            }
+
+            if (
+              !isRetryableStoreTusStatus(
+                status
+              )
+            ) {
+              throw createStoreTusHttpError(
+                `Upload ${label} gagal (${status}).`,
+                status
+              );
+            }
+
+            const serverOffset =
+              await readStoreTusOffset(
+                uploadUrl,
+                accessToken,
+                apiKey
+              );
+
+            if (
+              serverOffset == null
+            ) {
+              await AsyncStorage
+                .removeItem(
+                  resumeKey
+                );
+
+              uploadUrl =
+                await createStoreTusSession(
+                  endpoint,
+                  accessToken,
+                  apiKey,
+                  bucket,
+                  storagePath,
+                  contentType,
+                  sizeBytes
+                );
+
+              await AsyncStorage
+                .setItem(
+                  resumeKey,
+                  uploadUrl
+                );
+
+              offset = 0;
+              resumed = true;
+              resynced = true;
+              break;
+            }
+
+            if (
+              serverOffset !==
+              chunkStart
+            ) {
+              offset =
+                serverOffset;
+
+              resumed = true;
+              resynced = true;
+              break;
+            }
+
+            await waitForStoreTusRetry(
+              attempt
+            );
+          } catch (error) {
+            if (
+              cancelRequestedRef.current
+            ) {
+              throw error;
+            }
+
+            if (
+              attempt + 1 >=
+              STORE_DOCUMENT_TUS_MAX_ATTEMPTS
+            ) {
+              throw error;
+            }
+
+            try {
+              const serverOffset =
+                await readStoreTusOffset(
+                  uploadUrl,
+                  accessToken,
+                  apiKey
+                );
+
+              if (
+                serverOffset ==
+                null
+              ) {
+                await AsyncStorage
+                  .removeItem(
+                    resumeKey
+                  );
+
+                uploadUrl =
+                  await createStoreTusSession(
+                    endpoint,
+                    accessToken,
+                    apiKey,
+                    bucket,
+                    storagePath,
+                    contentType,
+                    sizeBytes
+                  );
+
+                await AsyncStorage
+                  .setItem(
+                    resumeKey,
+                    uploadUrl
+                  );
+
+                offset = 0;
+                resumed = true;
+                resynced = true;
+                break;
+              }
+
+              if (
+                serverOffset !==
+                chunkStart
+              ) {
+                offset =
+                  serverOffset;
+
+                resumed = true;
+                resynced = true;
+                break;
+              }
+            } catch {
+              // Retry menggunakan URL session yang sama.
+            }
+
+            await waitForStoreTusRetry(
+              attempt
+            );
+          }
+        }
+      } finally {
+        try {
+          if (
+            await ReactNativeBlobUtil
+              .fs
+              .exists(
+                chunkPath
+              )
+          ) {
+            await ReactNativeBlobUtil
+              .fs
+              .unlink(
+                chunkPath
+              );
+          }
+        } catch (cleanupError) {
+          console.warn(
+            "Cleanup chunk TUS gagal:",
+            cleanupError
+          );
         }
       }
 
       if (
-        cancelRequestedRef.current
+        resynced
+      ) {
+        continue;
+      }
+
+      if (
+        !chunkAccepted
       ) {
         throw new Error(
-          `Upload ${label} dibatalkan.`
+          `Upload ${label} gagal setelah retry.`
         );
       }
+    }
 
-      const status =
-        Number(
-          response.info().status
-        );
+    await AsyncStorage.removeItem(
+      resumeKey
+    );
 
-      if (
-        Number.isFinite(status) &&
-        status >= 200 &&
-        status < 300
-      ) {
-        trackStoreProductUploadSuccess({
-          productId,
-          bucket,
-          storagePath,
-          bytesTransferred:
-            Math.trunc(
-              sizeBytes
-            ),
-          latencyMs:
-            Math.max(
-              Date.now() -
-                uploadStartedAt,
-              0
-            ),
-          metadata: {
-            label,
-            status,
-            attempts:
-              attempt,
-            retried:
-              attempt > 1,
-          },
-        });
-
-        return Math.trunc(
+    trackStoreProductUploadSuccess({
+      productId,
+      bucket,
+      storagePath,
+      bytesTransferred:
+        Math.trunc(
           sizeBytes
-        );
-      }
+        ),
+      latencyMs:
+        Math.max(
+          Date.now() -
+            uploadStartedAt,
+          0
+        ),
+      metadata: {
+        label,
+        transport:
+          "supabase_tus_native_chunks",
+        resumable:
+          true,
+        resumed,
+        chunk_size_bytes:
+          STORE_DOCUMENT_TUS_CHUNK_SIZE,
+        chunks_completed:
+          completedChunks,
+      },
+    });
 
-      let responseText = "";
-
-      try {
-        responseText =
-          String(
-            await response.text()
-          ).trim();
-      } catch {
-        responseText = "";
-      }
-
-      const httpError =
-        new Error(
-          responseText
-            ? `Upload ${label} gagal (${status}): ${responseText}`
-            : `Upload ${label} gagal (${status}).`
-        ) as Error & {
-          statusCode?: number;
-        };
-
-      if (
-        Number.isFinite(status)
-      ) {
-        httpError.statusCode =
-          status;
-      }
-
-      const canRetryStatus =
-        !Number.isFinite(status) ||
-        isRetryableStoreDocumentUploadStatus(
-          status
-        );
-
-      if (
-        attempt <
-          STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS &&
-        canRetryStatus &&
-        !cancelRequestedRef.current
-      ) {
-        console.warn(
-          `Upload ${label} gagal sementara (${status}); mencoba ulang 1x.`
-        );
-
-        await waitForStoreDocumentUploadRetry();
-
-        continue;
-      }
-
-      throw httpError;
-    } catch (error) {
-      lastError =
-        error;
-
-      if (
-        cancelRequestedRef.current
-      ) {
-        throw error;
-      }
-
-      const errorStatus =
-        getStoreDocumentUploadErrorStatus(
-          error
-        );
-
-      const canRetryError =
-        errorStatus == null ||
-        isRetryableStoreDocumentUploadStatus(
-          errorStatus
-        );
-
-      if (
-        attempt <
-          STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS &&
-        canRetryError
-      ) {
-        console.warn(
-          `Upload ${label} mengalami gangguan; mencoba ulang 1x.`,
-          error
-        );
-
-        await waitForStoreDocumentUploadRetry();
-
-        continue;
-      }
-
+    return Math.trunc(
+      sizeBytes
+    );
+  } catch (error) {
+    if (
+      !cancelRequestedRef.current
+    ) {
       void trackMediaObservabilityEvent({
         eventType:
           "upload_failed",
@@ -1131,7 +1829,13 @@ async function uploadStoreDocumentNative(
         productId,
         bucket,
         storagePath,
-        bytesTransferred: 0,
+        bytesTransferred:
+          Math.max(
+            0,
+            Math.trunc(
+              offset
+            )
+          ),
         latencyMs:
           Math.max(
             Date.now() -
@@ -1143,26 +1847,26 @@ async function uploadStoreDocumentNative(
         metadata: {
           label,
           status:
-            errorStatus,
-          attempts:
-            attempt,
-          retry_exhausted:
-            attempt >=
-            STORE_DOCUMENT_UPLOAD_MAX_ATTEMPTS,
+            getStoreDocumentUploadErrorStatus(
+              error
+            ),
+          transport:
+            "supabase_tus_native_chunks",
+          resumable:
+            true,
+          resumed,
+          chunk_size_bytes:
+            STORE_DOCUMENT_TUS_CHUNK_SIZE,
+          resume_session_saved:
+            Boolean(
+              uploadUrl
+            ),
         },
       });
-
-      throw error;
     }
-  }
 
-  throw (
-    lastError instanceof Error
-      ? lastError
-      : new Error(
-          `Upload ${label} gagal.`
-        )
-  );
+    throw error;
+  }
 }
 
 export default function UploadProductScreen({
@@ -2993,7 +3697,26 @@ export default function UploadProductScreen({
           "File Word",
           originalMimeType,
           activeDocumentUploadRef,
-          documentUploadCancelledRef
+          documentUploadCancelledRef,
+          (
+            bytesUploaded,
+            bytesTotal
+          ) => {
+            if (
+              bytesTotal <= 0
+            ) {
+              return;
+            }
+
+            updateUploadProgress(
+              20 +
+                (
+                  bytesUploaded /
+                  bytesTotal
+                ) *
+                  25
+            );
+          }
         );
 
       originalUploaded =
@@ -3012,7 +3735,26 @@ export default function UploadProductScreen({
           "PDF pratinjau",
           "application/pdf",
           activeDocumentUploadRef,
-          documentUploadCancelledRef
+          documentUploadCancelledRef,
+          (
+            bytesUploaded,
+            bytesTotal
+          ) => {
+            if (
+              bytesTotal <= 0
+            ) {
+              return;
+            }
+
+            updateUploadProgress(
+              45 +
+                (
+                  bytesUploaded /
+                  bytesTotal
+                ) *
+                  35
+            );
+          }
         );
 
       updateUploadProgress(80);
@@ -3513,7 +4255,26 @@ export default function UploadProductScreen({
                 "File PDF",
                 pdfMimeType,
                 activeDocumentUploadRef,
-                documentUploadCancelledRef
+                documentUploadCancelledRef,
+                (
+                  bytesUploaded,
+                  bytesTotal
+                ) => {
+                  if (
+                    bytesTotal <= 0
+                  ) {
+                    return;
+                  }
+
+                  updateUploadProgress(
+                    20 +
+                      (
+                        bytesUploaded /
+                        bytesTotal
+                      ) *
+                        60
+                  );
+                }
               );
 
             const stagedPdfChange =
@@ -4365,7 +5126,26 @@ export default function UploadProductScreen({
               productFile.mimeType ??
                 "application/pdf",
               activeDocumentUploadRef,
-              documentUploadCancelledRef
+              documentUploadCancelledRef,
+              (
+                bytesUploaded,
+                bytesTotal
+              ) => {
+                if (
+                  bytesTotal <= 0
+                ) {
+                  return;
+                }
+
+                updateUploadProgress(
+                  20 +
+                    (
+                      bytesUploaded /
+                      bytesTotal
+                    ) *
+                      60
+                );
+              }
             );
         } else {
           const fileBuffer =
