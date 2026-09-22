@@ -5239,6 +5239,9 @@ export default function UploadProductScreen({
         { id: string } | null =
           null;
 
+      let reusedRecoveryDraft =
+        false;
+
       const recoveryProductId =
         createRecovery
           ?.recovery
@@ -5315,6 +5318,9 @@ export default function UploadProductScreen({
 
           created =
             updatedDraft;
+
+          reusedRecoveryDraft =
+            true;
         } else {
           const {
             data:
@@ -5339,6 +5345,9 @@ export default function UploadProductScreen({
 
           created =
             recreatedDraft;
+
+          reusedRecoveryDraft =
+            true;
         }
       }
 
@@ -5374,6 +5383,138 @@ export default function UploadProductScreen({
         created.id;
 
       updateUploadProgress(10);
+
+      if (
+        reusedRecoveryDraft &&
+        thumbnail
+      ) {
+        const {
+          data:
+            previousThumbnailLinks,
+          error:
+            previousThumbnailLinksError,
+        } = await supabase
+          .from(
+            "store_product_media"
+          )
+          .select(
+            "media_asset_id"
+          )
+          .eq(
+            "product_id",
+            created.id
+          )
+          .eq(
+            "role",
+            "thumbnail"
+          )
+          .eq(
+            "sort_order",
+            0
+          );
+
+        if (
+          previousThumbnailLinksError
+        ) {
+          throw previousThumbnailLinksError;
+        }
+
+        const previousThumbnailIds =
+          Array.from(
+            new Set(
+              (
+                previousThumbnailLinks ??
+                []
+              )
+                .map(
+                  row =>
+                    String(
+                      row.media_asset_id ??
+                        ""
+                    ).trim()
+                )
+                .filter(Boolean)
+            )
+          );
+
+        if (
+          previousThumbnailIds.length >
+          0
+        ) {
+          const {
+            data:
+              previousThumbnailAssets,
+            error:
+              previousThumbnailAssetsError,
+          } = await supabase
+            .from(
+              "media_assets"
+            )
+            .select(
+              "id,bucket,storage_path"
+            )
+            .in(
+              "id",
+              previousThumbnailIds
+            );
+
+          if (
+            previousThumbnailAssetsError
+          ) {
+            throw previousThumbnailAssetsError;
+          }
+
+          await rollbackStoreProductMediaAssets(
+            created.id,
+            previousThumbnailIds
+          );
+
+          for (
+            const staleAsset of
+            previousThumbnailAssets ??
+            []
+          ) {
+            const staleBucket =
+              String(
+                staleAsset.bucket ??
+                  ""
+              ).trim();
+
+            const stalePath =
+              String(
+                staleAsset.storage_path ??
+                  ""
+              ).trim();
+
+            if (
+              !staleBucket ||
+              !stalePath
+            ) {
+              continue;
+            }
+
+            const {
+              error:
+                staleStorageError,
+            } = await supabase.storage
+              .from(
+                staleBucket
+              )
+              .remove([
+                stalePath,
+              ]);
+
+            if (
+              staleStorageError
+            ) {
+              console.warn(
+                "Cleanup thumbnail recovery gagal:",
+                staleStorageError
+              );
+            }
+          }
+        }
+      }
 
       if (thumbnail) {
         const extension =
