@@ -2518,6 +2518,12 @@ export default function UploadProductScreen({
   ] =
     useState(false);
 
+  const [
+    showProductFilePickerMenu,
+    setShowProductFilePickerMenu,
+  ] =
+    useState(false);
+
 
   function selectProductFileKind(
     kind:
@@ -2536,6 +2542,47 @@ export default function UploadProductScreen({
     setProductPages([]);
 
     setErrorMessage("");
+  }
+
+
+  function handleProductFilePickerPress() {
+    setErrorMessage("");
+
+    if (
+      productFileKind ===
+      "office"
+    ) {
+      void chooseProductFile(
+        "office"
+      );
+
+      return;
+    }
+
+    setShowProductTypeMenu(false);
+    setShowSubjectMenu(false);
+    setShowClassLevelMenu(false);
+    setShowPricingTypeMenu(false);
+    setShowProductFileKindMenu(false);
+
+    setShowProductFilePickerMenu(
+      true
+    );
+  }
+
+
+  async function chooseProductFileFromMenu(
+    kind:
+      | "pdf"
+      | "image"
+  ) {
+    setShowProductFilePickerMenu(
+      false
+    );
+
+    await chooseProductFile(
+      kind
+    );
   }
 
 
@@ -3365,10 +3412,33 @@ export default function UploadProductScreen({
   }
 
 
-  async function chooseProductFile() {
+  async function chooseProductFile(
+    kindOverride?:
+      | "pdf"
+      | "image"
+      | "office"
+  ) {
+    const selectedFileKind =
+      kindOverride ??
+      productFileKind;
+
+    if (
+      kindOverride &&
+      productFileKind !==
+        kindOverride
+    ) {
+      setProductFileKind(
+        kindOverride
+      );
+
+      setProductFile(null);
+      setPreviewPdfFile(null);
+      setProductPages([]);
+    }
+
     setErrorMessage("");
 
-    if (!productFileKind) {
+    if (!selectedFileKind) {
       setErrorMessage(
         "Pilih jenis file terlebih dahulu."
       );
@@ -3382,7 +3452,7 @@ export default function UploadProductScreen({
      * Langsung buka galeri HP.
      */
     if (
-      productFileKind ===
+      selectedFileKind ===
       "image"
     ) {
       const permission =
@@ -3536,7 +3606,7 @@ export default function UploadProductScreen({
      * converter server-side tersedia.
      */
     const pickerTypes =
-      productFileKind === "office"
+      selectedFileKind === "office"
         ? [
             "application/msword",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -3582,7 +3652,7 @@ export default function UploadProductScreen({
       "";
 
     if (
-      productFileKind === "office"
+      selectedFileKind === "office"
     ) {
       const allowedOfficeExtensions =
         new Set([
@@ -3626,12 +3696,12 @@ export default function UploadProductScreen({
     ) {
       const sizeLimitKey:
         StoreMediaUploadSizeLimitKey =
-        productFileKind === "office"
+        selectedFileKind === "office"
           ? "productOriginalBytes"
           : "productDocumentBytes";
 
       const sizeLabel =
-        productFileKind === "office"
+        selectedFileKind === "office"
           ? "File Word"
           : "File PDF";
 
@@ -3662,7 +3732,7 @@ export default function UploadProductScreen({
     }
 
     const pdfPageCount =
-      productFileKind === "pdf"
+      selectedFileKind === "pdf"
         ? await getPickedPdfPageCount(
             asset.uri
           )
@@ -3677,7 +3747,7 @@ export default function UploadProductScreen({
       mimeType:
         asset.mimeType ??
         (
-          productFileKind === "pdf"
+          selectedFileKind === "pdf"
             ? "application/pdf"
             : "application/octet-stream"
         ),
@@ -6676,7 +6746,7 @@ export default function UploadProductScreen({
                     styles.filePicker
                   }
                   onPress={
-                    chooseProductFile
+                    handleProductFilePickerPress
                   }
                 >
                   <View
@@ -6779,14 +6849,11 @@ export default function UploadProductScreen({
               </>
             ) : (
               <Pressable
-                style={[
-                  styles.filePicker,
-
-                  !productFileKind &&
-                    styles.filePickerDisabled,
-                ]}
+                style={
+                  styles.filePicker
+                }
                 onPress={
-                  chooseProductFile
+                  handleProductFilePickerPress
                 }
               >
                 <View
@@ -6817,7 +6884,7 @@ export default function UploadProductScreen({
                         : productFileKind ===
                             "pdf"
                           ? "Pilih PDF"
-                          : "Pilih jenis file dahulu"}
+                          : "Pilih file produk"}
                   </Text>
 
                   <Text
@@ -6832,7 +6899,7 @@ export default function UploadProductScreen({
                         : productFileKind ===
                             "office"
                           ? "Pilih file Word"
-                          : "PDF saja")}
+                          : "PDF atau Gambar")}
                   </Text>
                 </View>
               </Pressable>
@@ -6964,6 +7031,191 @@ export default function UploadProductScreen({
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <Modal
+        visible={
+          showProductFilePickerMenu
+        }
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onRequestClose={() =>
+          setShowProductFilePickerMenu(
+            false
+          )
+        }
+      >
+        <View
+          style={
+            styles.uploadLimitModalRoot
+          }
+        >
+          <Pressable
+            style={
+              styles.uploadLimitModalBackdrop
+            }
+            onPress={() =>
+              setShowProductFilePickerMenu(
+                false
+              )
+            }
+          />
+
+          <View
+            style={[
+              styles.uploadLimitModalCard,
+              styles.filePickerChoiceCard,
+            ]}
+          >
+            <View
+              style={
+                styles.filePickerChoiceHeader
+              }
+            >
+              <View
+                style={
+                  styles.filePickerChoiceHeaderText
+                }
+              >
+                <Text
+                  style={
+                    styles.filePickerChoiceTitle
+                  }
+                >
+                  Pilih file produk
+                </Text>
+
+                <Text
+                  style={
+                    styles.filePickerChoiceSubtitle
+                  }
+                >
+                  Materi kamu berbentuk PDF atau kumpulan gambar?
+                </Text>
+              </View>
+
+              <Pressable
+                style={
+                  styles.filePickerChoiceClose
+                }
+                onPress={() =>
+                  setShowProductFilePickerMenu(
+                    false
+                  )
+                }
+                hitSlop={8}
+              >
+                <X
+                  size={18}
+                  color="#64748B"
+                />
+              </Pressable>
+            </View>
+
+            <Pressable
+              style={
+                styles.fileTypeOption
+              }
+              onPress={() => {
+                void chooseProductFileFromMenu(
+                  "pdf"
+                );
+              }}
+            >
+              <View
+                style={
+                  styles.fileTypeOptionIcon
+                }
+              >
+                <FileText
+                  size={21}
+                  color="#DC2626"
+                />
+              </View>
+
+              <View
+                style={
+                  styles.fileTypeOptionInfo
+                }
+              >
+                <Text
+                  style={
+                    styles.fileTypeOptionTitle
+                  }
+                >
+                  Pilih PDF
+                </Text>
+
+                <Text
+                  style={
+                    styles.fileTypeOptionSub
+                  }
+                >
+                  Satu file PDF untuk seluruh halaman materi.
+                </Text>
+              </View>
+            </Pressable>
+
+            <View
+              style={
+                styles.fileTypeDivider
+              }
+            />
+
+            <Pressable
+              style={
+                styles.fileTypeOption
+              }
+              onPress={() => {
+                void chooseProductFileFromMenu(
+                  "image"
+                );
+              }}
+            >
+              <View
+                style={
+                  styles.fileTypeOptionIcon
+                }
+              >
+                <ImageIcon
+                  size={21}
+                  color="#2563EB"
+                />
+              </View>
+
+              <View
+                style={
+                  styles.fileTypeOptionInfo
+                }
+              >
+                <Text
+                  style={
+                    styles.fileTypeOptionTitle
+                  }
+                >
+                  Pilih Gambar
+                </Text>
+
+                <Text
+                  style={
+                    styles.fileTypeOptionSub
+                  }
+                >
+                  Beberapa gambar untuk menjadi halaman produk.
+                </Text>
+              </View>
+            </Pressable>
+
+            <Text
+              style={
+                styles.filePickerChoiceHint
+              }
+            >
+              Untuk DOC/DOCX, pilih Word pada menu Jenis File.
+            </Text>
+          </View>
+        </View>
+      </Modal>
 
       <Modal
         visible={
@@ -7534,6 +7786,59 @@ const styles = StyleSheet.create({
       "PlusJakartaSans_600SemiBold",
     fontSize: 11,
     color: "#FFFFFF",
+  },
+
+  filePickerChoiceCard: {
+    alignItems: "stretch",
+    paddingHorizontal: 14,
+  },
+
+  filePickerChoiceHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+  },
+
+  filePickerChoiceHeaderText: {
+    flex: 1,
+  },
+
+  filePickerChoiceTitle: {
+    fontFamily:
+      "PlusJakartaSans_700Bold",
+    fontSize: 16,
+    color: "#0F172A",
+  },
+
+  filePickerChoiceSubtitle: {
+    marginTop: 4,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 11,
+    lineHeight: 16,
+    color: "#64748B",
+  },
+
+  filePickerChoiceClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#F8FAFC",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  filePickerChoiceHint: {
+    marginTop: 10,
+    marginBottom: 2,
+    fontFamily:
+      "PlusJakartaSans_400Regular",
+    fontSize: 10,
+    lineHeight: 15,
+    color: "#94A3B8",
+    textAlign: "center",
   },
 
   uploadLimitModalRoot: {
