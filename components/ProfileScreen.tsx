@@ -152,6 +152,205 @@ function getUsername(
 }
 
 
+const PROFILE_AVATAR_PUBLIC_MARKER =
+  "/storage/v1/object/public/profile-avatars/";
+
+
+function getProfileAvatarStoragePath(
+  avatarUrl: string,
+  ownerUserId: string
+): string | null {
+  const cleanUrl =
+    avatarUrl.trim();
+
+  if (
+    !cleanUrl ||
+    !cleanUrl.includes(
+      PROFILE_AVATAR_PUBLIC_MARKER
+    )
+  ) {
+    return null;
+  }
+
+  const encodedPath =
+    cleanUrl
+      .split(
+        PROFILE_AVATAR_PUBLIC_MARKER
+      )[1]
+      ?.split("?")[0];
+
+  if (!encodedPath) {
+    return null;
+  }
+
+  let storagePath = "";
+
+  try {
+    storagePath =
+      decodeURIComponent(
+        encodedPath
+      );
+  } catch {
+    return null;
+  }
+
+  const ownerPrefix =
+    ownerUserId + "/";
+
+  if (
+    !storagePath.startsWith(
+      ownerPrefix
+    )
+  ) {
+    return null;
+  }
+
+  return storagePath;
+}
+
+
+async function cleanupProfileAvatarOrphans(
+  ownerUserId: string,
+  activeAvatarUrl: string
+): Promise<number> {
+  const keepPath =
+    getProfileAvatarStoragePath(
+      activeAvatarUrl,
+      ownerUserId
+    );
+
+  if (!keepPath) {
+    return 0;
+  }
+
+  const stalePaths:
+    string[] = [];
+
+  const pageSize = 100;
+
+  for (
+    let offset = 0;
+    offset < 1000;
+    offset += pageSize
+  ) {
+    const {
+      data,
+      error,
+    } = await supabase.storage
+      .from(
+        "profile-avatars"
+      )
+      .list(
+        ownerUserId,
+        {
+          limit:
+            pageSize,
+          offset,
+          sortBy: {
+            column:
+              "name",
+            order:
+              "asc",
+          },
+        }
+      );
+
+    if (error) {
+      throw error;
+    }
+
+    const page =
+      data ?? [];
+
+    for (
+      const item of page
+    ) {
+      const name =
+        String(
+          item.name ?? ""
+        ).trim();
+
+      if (
+        !item.id ||
+        !name ||
+        !/.(jpg|jpeg|png|webp)$/i.test(
+          name
+        )
+      ) {
+        continue;
+      }
+
+      const storagePath =
+        ownerUserId +
+        "/" +
+        name;
+
+      if (
+        storagePath ===
+        keepPath
+      ) {
+        continue;
+      }
+
+      stalePaths.push(
+        storagePath
+      );
+    }
+
+    if (
+      page.length <
+      pageSize
+    ) {
+      break;
+    }
+  }
+
+  const uniqueStalePaths =
+    Array.from(
+      new Set(
+        stalePaths
+      )
+    );
+
+  if (
+    uniqueStalePaths.length ===
+    0
+  ) {
+    return 0;
+  }
+
+  for (
+    let index = 0;
+    index <
+      uniqueStalePaths.length;
+    index += 100
+  ) {
+    const batch =
+      uniqueStalePaths.slice(
+        index,
+        index + 100
+      );
+
+    const {
+      error:
+        removeError,
+    } = await supabase.storage
+      .from(
+        "profile-avatars"
+      )
+      .remove(
+        batch
+      );
+
+    if (removeError) {
+      throw removeError;
+    }
+  }
+
+  return uniqueStalePaths.length;
+}
+
+
 export default function ProfileScreen({
   onBack,
   initialName = "",
@@ -756,12 +955,44 @@ const [
             )
         );
 
-        setAvatarUrl(
+        const resolvedAvatarUrl =
           profileRow
             ?.avatar_url
             ?.trim() ||
-            initialAvatarUrl.trim()
+          initialAvatarUrl.trim();
+
+        setAvatarUrl(
+          resolvedAvatarUrl
         );
+
+        if (
+          resolvedAvatarUrl
+        ) {
+          void cleanupProfileAvatarOrphans(
+            user.id,
+            resolvedAvatarUrl
+          )
+            .then(
+              removed => {
+                if (
+                  removed > 0
+                ) {
+                  console.log(
+                    "Avatar orphan dibersihkan:",
+                    removed
+                  );
+                }
+              }
+            )
+            .catch(
+              cleanupError => {
+                console.warn(
+                  "Cleanup avatar orphan gagal:",
+                  cleanupError
+                );
+              }
+            );
+        }
 
         setLoading(false);
 
@@ -1739,10 +1970,6 @@ const [
       }
 
 
-      const previousUrl =
-        avatarUrl;
-
-
       const {
         data: updatedProfile,
         error: profileError,
@@ -1794,50 +2021,38 @@ const [
       }
 
 
-      setAvatarUrl(
+      const nextAvatarUrl =
         updatedProfile
           .avatar_url ??
-          publicUrl
+        publicUrl;
+
+      setAvatarUrl(
+        nextAvatarUrl
       );
 
+      try {
+        const removedAvatarOrphans =
+          await cleanupProfileAvatarOrphans(
+            currentUserId,
+            nextAvatarUrl
+          );
 
-      const marker =
-        "/storage/v1/object/public/profile-avatars/";
-
-      if (
-        previousUrl &&
-        previousUrl.includes(
-          marker
-        )
-      ) {
-        const encodedOldPath =
-          previousUrl
-            .split(
-              marker
-            )[1]
-            ?.split("?")[0];
-
-        if (encodedOldPath) {
-          const oldPath =
-            decodeURIComponent(
-              encodedOldPath
-            );
-
-          if (
-            oldPath &&
-            oldPath !==
-              uploadedPath
-          ) {
-            void supabase
-              .storage
-              .from(
-                "profile-avatars"
-              )
-              .remove([
-                oldPath,
-              ]);
-          }
+        if (
+          removedAvatarOrphans >
+          0
+        ) {
+          console.log(
+            "Avatar orphan setelah upload dibersihkan:",
+            removedAvatarOrphans
+          );
         }
+      } catch (
+        avatarCleanupError
+      ) {
+        console.warn(
+          "Cleanup avatar setelah upload gagal:",
+          avatarCleanupError
+        );
       }
 
 
