@@ -2307,13 +2307,6 @@ export default function UploadProductScreen({
       | "image"
       | "office"
   ) {
-    if (
-      productFileKind === kind
-    ) {
-      setShowProductFileKindMenu(false);
-      return;
-    }
-
     setProductFileKind(kind);
     setShowProductFileKindMenu(false);
                 setShowPricingTypeMenu(false);
@@ -5983,212 +5976,206 @@ export default function UploadProductScreen({
 
           <View style={styles.field}>
             <Text style={styles.label}>
-              Format Isi Produk
+              Jenis File
             </Text>
-
-            <Text
-              style={
-                styles.fileFormatHint
-              }
-            >
-              Pilih sesuai bentuk materi yang akan dilihat pembeli.
-            </Text>
-
-            <View
-              style={
-                styles.fileFormatGrid
-              }
-            >
-              <Pressable
-                style={[
-                  styles.fileFormatCard,
-                  productFileKind ===
-                    "pdf" &&
-                    styles.fileFormatCardSelected,
-                ]}
-                onPress={() =>
-                  selectProductFileKind(
-                    "pdf"
-                  )
-                }
-              >
-                <View
-                  style={[
-                    styles.fileFormatIcon,
-                    styles.fileFormatPdfIcon,
-                  ]}
-                >
-                  <FileText
-                    size={22}
-                    color="#DC2626"
-                  />
-                </View>
-
-                <Text
-                  style={
-                    styles.fileFormatCardTitle
-                  }
-                >
-                  PDF
-                </Text>
-
-                <Text
-                  style={
-                    styles.fileFormatCardDescription
-                  }
-                >
-                  Satu dokumen PDF siap dibaca.
-                </Text>
-
-                {productFileKind ===
-                "pdf" ? (
-                  <View
-                    style={
-                      styles.fileFormatBadge
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.fileFormatBadgeText
-                      }
-                    >
-                      Dipilih
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-
-              <Pressable
-                style={[
-                  styles.fileFormatCard,
-                  productFileKind ===
-                    "image" &&
-                    styles.fileFormatCardSelected,
-                ]}
-                onPress={() =>
-                  selectProductFileKind(
-                    "image"
-                  )
-                }
-              >
-                <View
-                  style={[
-                    styles.fileFormatIcon,
-                    styles.fileFormatImageIcon,
-                  ]}
-                >
-                  <ImageIcon
-                    size={22}
-                    color="#2563EB"
-                  />
-                </View>
-
-                <Text
-                  style={
-                    styles.fileFormatCardTitle
-                  }
-                >
-                  Gambar
-                </Text>
-
-                <Text
-                  style={
-                    styles.fileFormatCardDescription
-                  }
-                >
-                  Foto atau scan per halaman.
-                </Text>
-
-                {productFileKind ===
-                "image" ? (
-                  <View
-                    style={
-                      styles.fileFormatBadge
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.fileFormatBadgeText
-                      }
-                    >
-                      Dipilih
-                    </Text>
-                  </View>
-                ) : null}
-              </Pressable>
-            </View>
 
             <Pressable
-              style={[
-                styles.fileFormatWordRow,
-                productFileKind ===
-                  "office" &&
-                  styles.fileFormatWordRowSelected,
-              ]}
-              onPress={() =>
-                selectProductFileKind(
-                  "office"
-                )
+              style={
+                styles.fileTypeSelector
               }
+              onPress={() => {
+                setShowProductFileKindMenu(
+                  value => !value
+                );
+
+                setShowProductTypeMenu(false);
+                setShowSubjectMenu(false);
+                setShowClassLevelMenu(false);
+                setShowPricingTypeMenu(false);
+              }}
             >
-              <View
-                style={
-                  styles.fileFormatWordIcon
-                }
+              <Text
+                style={[
+                  styles.fileTypeValue,
+                  !productFileKind &&
+                    styles.fileTypePlaceholder,
+                ]}
               >
-                <Files
-                  size={19}
-                  color="#F97316"
+                {productFileKind === "pdf"
+                  ? "PDF"
+                  : productFileKind === "image"
+                    ? "Gambar"
+                    : productFileKind === "office"
+                      ? "Word"
+                      : "Pilih jenis file"}
+              </Text>
+
+              {showProductFileKindMenu ? (
+                <ChevronUp
+                  size={18}
+                  strokeWidth={1.8}
+                  color="#64748B"
                 />
-              </View>
-
-              <View
-                style={
-                  styles.fileFormatWordInfo
-                }
-              >
-                <Text
-                  style={
-                    styles.fileFormatWordTitle
-                  }
-                >
-                  Punya file Word?
-                </Text>
-
-                <Text
-                  style={
-                    styles.fileFormatWordDescription
-                  }
-                >
-                  Pilih DOC/DOCX dan tambahkan PDF pratinjau.
-                </Text>
-              </View>
-
-              {productFileKind ===
-              "office" ? (
-                <Text
-                  style={
-                    styles.fileFormatWordSelectedText
-                  }
-                >
-                  Dipilih
-                </Text>
-              ) : null}
+              ) : (
+                <ChevronDown
+                  size={18}
+                  strokeWidth={1.8}
+                  color="#64748B"
+                />
+              )}
             </Pressable>
 
-            <Text
-              style={
-                styles.fileFormatNextHint
-              }
-            >
-              {productFileKind === "pdf"
-                ? "Selanjutnya: pilih 1 file PDF."
-                : productFileKind === "image"
-                  ? "Selanjutnya: pilih gambar halaman dan atur urutannya."
-                  : productFileKind === "office"
-                    ? "Selanjutnya: pilih Word, lalu PDF pratinjau."
-                    : "Pilih PDF atau Gambar untuk melanjutkan."}
-            </Text>
+            {showProductFileKindMenu ? (
+              <View
+                style={
+                  styles.fileTypeMenu
+                }
+              >
+                <Pressable
+                  style={
+                    styles.fileTypeOption
+                  }
+                  onPress={() =>
+                    selectProductFileKind(
+                      "pdf"
+                    )
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileTypeOptionIcon
+                    }
+                  >
+                    <FileText
+                      size={19}
+                      color="#DC2626"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileTypeOptionInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTypeOptionTitle
+                      }
+                    >
+                      PDF
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileTypeOptionSub
+                      }
+                    >
+                      Dokumen PDF
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <View
+                  style={
+                    styles.fileTypeDivider
+                  }
+                />
+
+                <Pressable
+                  style={
+                    styles.fileTypeOption
+                  }
+                  onPress={() =>
+                    selectProductFileKind(
+                      "office"
+                    )
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileTypeOptionIcon
+                    }
+                  >
+                    <Files
+                      size={19}
+                      color="#F97316"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileTypeOptionInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTypeOptionTitle
+                      }
+                    >
+                      Word
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileTypeOptionSub
+                      }
+                    >
+                      DOC, DOCX
+                    </Text>
+                  </View>
+                </Pressable>
+
+                <View
+                  style={
+                    styles.fileTypeDivider
+                  }
+                />
+
+                <Pressable
+                  style={
+                    styles.fileTypeOption
+                  }
+                  onPress={() =>
+                    selectProductFileKind(
+                      "image"
+                    )
+                  }
+                >
+                  <View
+                    style={
+                      styles.fileTypeOptionIcon
+                    }
+                  >
+                    <ImageIcon
+                      size={19}
+                      color="#2563EB"
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.fileTypeOptionInfo
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.fileTypeOptionTitle
+                      }
+                    >
+                      Gambar
+                    </Text>
+
+                    <Text
+                      style={
+                        styles.fileTypeOptionSub
+                      }
+                    >
+                      JPG, PNG atau WEBP
+                    </Text>
+                  </View>
+                </Pressable>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.field}>
@@ -6936,151 +6923,6 @@ const styles = StyleSheet.create({
 
   compactPriceInput: {
     marginTop: 3,
-  },
-
-  fileFormatHint: {
-    marginTop: 3,
-    marginBottom: 10,
-    fontFamily:
-      "PlusJakartaSans_400Regular",
-    fontSize: 11,
-    lineHeight: 16,
-    color: "#64748B",
-  },
-
-  fileFormatGrid: {
-    flexDirection: "row",
-    gap: 10,
-  },
-
-  fileFormatCard: {
-    flex: 1,
-    minHeight: 132,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 16,
-    backgroundColor: "#FFFFFF",
-    padding: 12,
-  },
-
-  fileFormatCardSelected: {
-    borderColor: "#2563EB",
-    borderWidth: 1.5,
-    backgroundColor: "#EFF6FF",
-  },
-
-  fileFormatIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 11,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  fileFormatPdfIcon: {
-    backgroundColor: "#FEF2F2",
-  },
-
-  fileFormatImageIcon: {
-    backgroundColor: "#EFF6FF",
-  },
-
-  fileFormatCardTitle: {
-    marginTop: 10,
-    fontFamily:
-      "PlusJakartaSans_700Bold",
-    fontSize: 13,
-    color: "#0F172A",
-  },
-
-  fileFormatCardDescription: {
-    marginTop: 3,
-    fontFamily:
-      "PlusJakartaSans_400Regular",
-    fontSize: 10.5,
-    lineHeight: 15,
-    color: "#64748B",
-  },
-
-  fileFormatBadge: {
-    alignSelf: "flex-start",
-    marginTop: 8,
-    borderRadius: 99,
-    backgroundColor: "#DBEAFE",
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-
-  fileFormatBadgeText: {
-    fontFamily:
-      "PlusJakartaSans_600SemiBold",
-    fontSize: 9,
-    color: "#1D4ED8",
-  },
-
-  fileFormatWordRow: {
-    marginTop: 10,
-    minHeight: 58,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  fileFormatWordRowSelected: {
-    borderColor: "#F97316",
-    backgroundColor: "#FFF7ED",
-  },
-
-  fileFormatWordIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#FFF7ED",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  fileFormatWordInfo: {
-    flex: 1,
-    marginLeft: 10,
-  },
-
-  fileFormatWordTitle: {
-    fontFamily:
-      "PlusJakartaSans_600SemiBold",
-    fontSize: 11.5,
-    color: "#0F172A",
-  },
-
-  fileFormatWordDescription: {
-    marginTop: 2,
-    fontFamily:
-      "PlusJakartaSans_400Regular",
-    fontSize: 10,
-    lineHeight: 14,
-    color: "#64748B",
-  },
-
-  fileFormatWordSelectedText: {
-    marginLeft: 8,
-    fontFamily:
-      "PlusJakartaSans_600SemiBold",
-    fontSize: 9.5,
-    color: "#EA580C",
-  },
-
-  fileFormatNextHint: {
-    marginTop: 9,
-    fontFamily:
-      "PlusJakartaSans_500Medium",
-    fontSize: 10.5,
-    lineHeight: 15,
-    color: "#475569",
   },
 
   fileTypeSelector: {
