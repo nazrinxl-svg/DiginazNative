@@ -764,7 +764,28 @@ const STORE_DOCUMENT_TUS_RETRY_DELAYS = [
 ];
 
 const STORE_DOCUMENT_TUS_RESUME_PREFIX =
-  "@diginaz/store-document-tus/v1:";
+  "@diginaz/store-document-tus/v2:";
+
+type StoreDocumentTusRecoveryRecord = {
+  version: 2;
+  ownerUserId: string;
+  productId: string;
+  bucket: string;
+  storagePath: string;
+  fileHash: string;
+  sizeBytes: number;
+  uploadUrl: string;
+  updatedAt: number;
+};
+
+type StoreDocumentTusRecoveryCandidate = {
+  localPath: string;
+  sizeBytes: number;
+  fileHash: string;
+  resumeKey: string;
+  recovery:
+    StoreDocumentTusRecoveryRecord | null;
+};
 
 
 function getStoreDocumentTusEndpoint() {
@@ -804,19 +825,184 @@ function getStoreDocumentTusEndpoint() {
 
 
 function getStoreDocumentTusResumeKey(
-  productId: string,
+  ownerUserId: string,
   bucket: string,
-  storagePath: string,
+  fileHash: string,
   sizeBytes: number
 ) {
   return (
     STORE_DOCUMENT_TUS_RESUME_PREFIX +
     [
-      productId,
+      ownerUserId,
       bucket,
-      storagePath,
+      fileHash,
       Math.trunc(sizeBytes),
     ].join(":")
+  );
+}
+
+
+async function getStoreDocumentTusRecoveryCandidate(
+  ownerUserId: string,
+  bucket: string,
+  asset: PickedAsset,
+  label: string
+): Promise<StoreDocumentTusRecoveryCandidate> {
+  const localPath =
+    normalizeStoreDocumentUploadPath(
+      asset.uri
+    );
+
+  if (
+    !localPath ||
+    localPath.startsWith(
+      "content://"
+    )
+  ) {
+    throw new Error(
+      `${label} belum tersedia sebagai file lokal untuk upload.`
+    );
+  }
+
+  const stat =
+    await ReactNativeBlobUtil
+      .fs
+      .stat(
+        localPath
+      );
+
+  const sizeBytes =
+    Number(
+      stat.size ?? 0
+    );
+
+  if (
+    !Number.isFinite(
+      sizeBytes
+    ) ||
+    sizeBytes <= 0
+  ) {
+    throw new Error(
+      `${label} kosong atau tidak dapat dibaca.`
+    );
+  }
+
+  const fileHash =
+    String(
+      await ReactNativeBlobUtil
+        .fs
+        .hash(
+          localPath,
+          "sha256"
+        )
+    ).toLowerCase();
+
+  if (!fileHash) {
+    throw new Error(
+      `Fingerprint ${label} tidak tersedia.`
+    );
+  }
+
+  const resumeKey =
+    getStoreDocumentTusResumeKey(
+      ownerUserId,
+      bucket,
+      fileHash,
+      sizeBytes
+    );
+
+  const rawRecovery =
+    await AsyncStorage.getItem(
+      resumeKey
+    );
+
+  let recovery:
+    StoreDocumentTusRecoveryRecord | null =
+      null;
+
+  if (rawRecovery) {
+    try {
+      const parsed =
+        JSON.parse(
+          rawRecovery
+        ) as Partial<
+          StoreDocumentTusRecoveryRecord
+        >;
+
+      const valid =
+        parsed.version === 2 &&
+        parsed.ownerUserId ===
+          ownerUserId &&
+        parsed.bucket ===
+          bucket &&
+        parsed.fileHash ===
+          fileHash &&
+        Number(
+          parsed.sizeBytes
+        ) ===
+          Math.trunc(
+            sizeBytes
+          ) &&
+        typeof parsed.productId ===
+          "string" &&
+        Boolean(
+          parsed.productId.trim()
+        ) &&
+        typeof parsed.storagePath ===
+          "string" &&
+        Boolean(
+          parsed.storagePath.trim()
+        ) &&
+        typeof parsed.uploadUrl ===
+          "string" &&
+        Boolean(
+          parsed.uploadUrl.trim()
+        );
+
+      if (valid) {
+        recovery =
+          parsed as
+            StoreDocumentTusRecoveryRecord;
+      } else {
+        await AsyncStorage.removeItem(
+          resumeKey
+        );
+      }
+    } catch {
+      await AsyncStorage.removeItem(
+        resumeKey
+      );
+    }
+  }
+
+  return {
+    localPath,
+    sizeBytes:
+      Math.trunc(
+        sizeBytes
+      ),
+    fileHash,
+    resumeKey,
+    recovery,
+  };
+}
+
+
+async function saveStoreDocumentTusRecovery(
+  resumeKey: string,
+  input: Omit<
+    StoreDocumentTusRecoveryRecord,
+    "version" | "updatedAt"
+  >
+) {
+  await AsyncStorage.setItem(
+    resumeKey,
+    JSON.stringify({
+      version: 2,
+      ...input,
+      updatedAt:
+        Date.now(),
+    })
   );
 }
 
@@ -1190,6 +1376,7 @@ function trackStoreProductUploadSuccess(input: {
 
 
 async function uploadStoreDocumentNative(
+  ownerUserId: string,
   productId: string,
   bucket: string,
   storagePath: string,
@@ -1216,43 +1403,39 @@ async function uploadStoreDocumentNative(
     );
   }
 
-  const localPath =
-    normalizeStoreDocumentUploadPath(
-      asset.uri
+  const recoveryCandidate =
+    await getStoreDocumentTusRecoveryCandidate(
+      ownerUserId,
+      bucket,
+      asset,
+      label
     );
 
+  const {
+    localPath,
+    sizeBytes,
+    fileHash,
+    resumeKey,
+  } = recoveryCandidate;
+
+  let matchedRecovery =
+    recoveryCandidate.recovery;
+
   if (
-    !localPath ||
-    localPath.startsWith(
-      "content://"
+    matchedRecovery &&
+    (
+      matchedRecovery.productId !==
+        productId ||
+      matchedRecovery.storagePath !==
+        storagePath
     )
   ) {
-    throw new Error(
-      `${label} belum tersedia sebagai file lokal untuk upload.`
-    );
-  }
-
-  const stat =
-    await ReactNativeBlobUtil
-      .fs
-      .stat(
-        localPath
-      );
-
-  const sizeBytes =
-    Number(
-      stat.size ?? 0
+    await AsyncStorage.removeItem(
+      resumeKey
     );
 
-  if (
-    !Number.isFinite(
-      sizeBytes
-    ) ||
-    sizeBytes <= 0
-  ) {
-    throw new Error(
-      `${label} kosong atau tidak dapat dibaca.`
-    );
+    matchedRecovery =
+      null;
   }
 
   assertStoreMediaUploadSize(
@@ -1300,21 +1483,13 @@ async function uploadStoreDocumentNative(
   const endpoint =
     getStoreDocumentTusEndpoint();
 
-  const resumeKey =
-    getStoreDocumentTusResumeKey(
-      productId,
-      bucket,
-      storagePath,
-      sizeBytes
-    );
-
   const uploadStartedAt =
     Date.now();
 
   let uploadUrl =
-    await AsyncStorage.getItem(
-      resumeKey
-    );
+    matchedRecovery
+      ?.uploadUrl ??
+    null;
 
   let offset = 0;
   let resumed = false;
@@ -1360,9 +1535,17 @@ async function uploadStoreDocumentNative(
           sizeBytes
         );
 
-      await AsyncStorage.setItem(
+      await saveStoreDocumentTusRecovery(
         resumeKey,
-        uploadUrl
+        {
+          ownerUserId,
+          productId,
+          bucket,
+          storagePath,
+          fileHash,
+          sizeBytes,
+          uploadUrl,
+        }
       );
 
       offset = 0;
@@ -1531,11 +1714,18 @@ async function uploadStoreDocumentNative(
                   sizeBytes
                 );
 
-              await AsyncStorage
-                .setItem(
-                  resumeKey,
-                  uploadUrl
-                );
+              await saveStoreDocumentTusRecovery(
+                resumeKey,
+                {
+                  ownerUserId,
+                  productId,
+                  bucket,
+                  storagePath,
+                  fileHash,
+                  sizeBytes,
+                  uploadUrl,
+                }
+              );
 
               offset = 0;
               resumed = true;
@@ -1643,11 +1833,18 @@ async function uploadStoreDocumentNative(
                   sizeBytes
                 );
 
-              await AsyncStorage
-                .setItem(
-                  resumeKey,
-                  uploadUrl
-                );
+              await saveStoreDocumentTusRecovery(
+                resumeKey,
+                {
+                  ownerUserId,
+                  productId,
+                  bucket,
+                  storagePath,
+                  fileHash,
+                  sizeBytes,
+                  uploadUrl,
+                }
+              );
 
               offset = 0;
               resumed = true;
@@ -1712,11 +1909,18 @@ async function uploadStoreDocumentNative(
                     sizeBytes
                   );
 
-                await AsyncStorage
-                  .setItem(
-                    resumeKey,
-                    uploadUrl
-                  );
+                await saveStoreDocumentTusRecovery(
+                resumeKey,
+                {
+                  ownerUserId,
+                  productId,
+                  bucket,
+                  storagePath,
+                  fileHash,
+                  sizeBytes,
+                  uploadUrl,
+                }
+              );
 
                 offset = 0;
                 resumed = true;
@@ -1811,6 +2015,13 @@ async function uploadStoreDocumentNative(
           STORE_DOCUMENT_TUS_CHUNK_SIZE,
         chunks_completed:
           completedChunks,
+        recovery_key_version:
+          2,
+        file_fingerprint:
+          fileHash.slice(
+            0,
+            12
+          ),
       },
     });
 
@@ -1860,6 +2071,13 @@ async function uploadStoreDocumentNative(
           resume_session_saved:
             Boolean(
               uploadUrl
+            ),
+          recovery_key_version:
+            2,
+          file_fingerprint:
+            fileHash.slice(
+              0,
+              12
             ),
         },
       });
@@ -3660,21 +3878,49 @@ export default function UploadProductScreen({
       );
 
 
-    const originalPath =
-      buildStoreProductOriginalPath(
+    const originalRecovery =
+      await getStoreDocumentTusRecoveryCandidate(
         userId,
-        productId,
-        cleanOriginalName,
-        batchId
+        STORE_MEDIA_BUCKETS.productOriginals,
+        wordAsset,
+        "File Word"
       );
 
-    const pdfPath =
-      buildStoreProductFilePath(
+    const previewRecovery =
+      await getStoreDocumentTusRecoveryCandidate(
         userId,
-        productId,
-        cleanPreviewName,
-        batchId
+        STORE_MEDIA_BUCKETS.productFiles,
+        previewAsset,
+        "PDF pratinjau"
       );
+
+    const originalPath =
+      originalRecovery.recovery
+        ?.productId ===
+        productId
+        ? originalRecovery
+            .recovery
+            .storagePath
+        : buildStoreProductOriginalPath(
+            userId,
+            productId,
+            cleanOriginalName,
+            batchId
+          );
+
+    const pdfPath =
+      previewRecovery.recovery
+        ?.productId ===
+        productId
+        ? previewRecovery
+            .recovery
+            .storagePath
+        : buildStoreProductFilePath(
+            userId,
+            productId,
+            cleanPreviewName,
+            batchId
+          );
 
 
     const originalMimeType =
@@ -3689,6 +3935,7 @@ export default function UploadProductScreen({
     try {
       const originalSizeBytes =
         await uploadStoreDocumentNative(
+          userId,
           productId,
           STORE_MEDIA_BUCKETS.productOriginals,
           originalPath,
@@ -3727,6 +3974,7 @@ export default function UploadProductScreen({
 
       const previewSizeBytes =
         await uploadStoreDocumentNative(
+          userId,
           productId,
           STORE_MEDIA_BUCKETS.productFiles,
           pdfPath,
@@ -4234,12 +4482,27 @@ export default function UploadProductScreen({
                 rawFileName
               );
 
-            filePath =
-              buildStoreProductFilePath(
+            const editPdfRecovery =
+              await getStoreDocumentTusRecoveryCandidate(
                 user.id,
-                editProductId,
-                cleanFileName
+                STORE_MEDIA_BUCKETS.productFiles,
+                productFile,
+                "File PDF"
               );
+
+            filePath =
+              editPdfRecovery
+                .recovery
+                ?.productId ===
+                editProductId
+                ? editPdfRecovery
+                    .recovery
+                    .storagePath
+                : buildStoreProductFilePath(
+                    user.id,
+                    editProductId,
+                    cleanFileName
+                  );
 
             const pdfMimeType =
               productFile.mimeType ??
@@ -4247,6 +4510,7 @@ export default function UploadProductScreen({
 
             const fileSizeBytes =
               await uploadStoreDocumentNative(
+                user.id,
                 editProductId,
                 STORE_MEDIA_BUCKETS.productFiles,
                 filePath,
@@ -4851,6 +5115,73 @@ export default function UploadProductScreen({
         );
       }
 
+      let createRecovery:
+        StoreDocumentTusRecoveryCandidate | null =
+          null;
+
+      if (
+        productFileKind ===
+          "pdf"
+      ) {
+        createRecovery =
+          await getStoreDocumentTusRecoveryCandidate(
+            user.id,
+            STORE_MEDIA_BUCKETS.productFiles,
+            productFile,
+            "File PDF"
+          );
+      } else if (
+        productFileKind ===
+          "office"
+      ) {
+        const officeRecovery =
+          await getStoreDocumentTusRecoveryCandidate(
+            user.id,
+            STORE_MEDIA_BUCKETS.productOriginals,
+            productFile,
+            "File Word"
+          );
+
+        const previewRecovery =
+          previewPdfFile
+            ? await getStoreDocumentTusRecoveryCandidate(
+                user.id,
+                STORE_MEDIA_BUCKETS.productFiles,
+                previewPdfFile,
+                "PDF pratinjau"
+              )
+            : null;
+
+        const candidates = [
+          officeRecovery,
+          previewRecovery,
+        ].filter(
+          (
+            candidate
+          ): candidate is
+            StoreDocumentTusRecoveryCandidate =>
+            Boolean(
+              candidate?.recovery
+            )
+        );
+
+        candidates.sort(
+          (left, right) =>
+            (
+              right.recovery
+                ?.updatedAt ?? 0
+            ) -
+            (
+              left.recovery
+                ?.updatedAt ?? 0
+            )
+        );
+
+        createRecovery =
+          candidates[0] ??
+          officeRecovery;
+      }
+
       const {
         data: profile,
       } = await supabase
@@ -4866,33 +5197,168 @@ export default function UploadProductScreen({
           ?.toUpperCase() ||
         "KREATOR";
 
-      const {
-        data: created,
-        error: createError,
-      } = await supabase
-        .from("store_products")
-        .insert({
-          creator_user_id: user.id,
-          creator_name: creatorName,
-          title: cleanTitle,
-          product_type: productType,
-          subject: cleanSubject,
-          class_level: classLevel,
-          pricing_type: pricingType,
-          price_amount: priceAmount,
-          original_price_amount: null,
-          description:
-            cleanDescription,
-          status: "draft",
-        })
-        .select("id")
-        .single();
+      const draftPayload = {
+        creator_user_id:
+          user.id,
+        creator_name:
+          creatorName,
+        title:
+          cleanTitle,
+        product_type:
+          productType,
+        subject:
+          cleanSubject,
+        class_level:
+          classLevel,
+        pricing_type:
+          pricingType,
+        price_amount:
+          priceAmount,
+        original_price_amount:
+          null,
+        description:
+          cleanDescription,
+        status:
+          "draft",
+      };
 
-      if (createError) {
-        throw createError;
+      let created:
+        { id: string } | null =
+          null;
+
+      const recoveryProductId =
+        createRecovery
+          ?.recovery
+          ?.productId ??
+        null;
+
+      if (recoveryProductId) {
+        const {
+          data:
+            existingRecoveryDraft,
+          error:
+            existingRecoveryDraftError,
+        } = await supabase
+          .from("store_products")
+          .select("id,status")
+          .eq(
+            "id",
+            recoveryProductId
+          )
+          .eq(
+            "creator_user_id",
+            user.id
+          )
+          .maybeSingle();
+
+        if (
+          existingRecoveryDraftError
+        ) {
+          throw existingRecoveryDraftError;
+        }
+
+        if (
+          existingRecoveryDraft
+            ?.status ===
+          "published"
+        ) {
+          if (createRecovery) {
+            await AsyncStorage.removeItem(
+              createRecovery.resumeKey
+            );
+          }
+
+          createRecovery =
+            null;
+        } else if (
+          existingRecoveryDraft
+        ) {
+          const {
+            data:
+              updatedDraft,
+            error:
+              updatedDraftError,
+          } = await supabase
+            .from("store_products")
+            .update(
+              draftPayload
+            )
+            .eq(
+              "id",
+              recoveryProductId
+            )
+            .eq(
+              "creator_user_id",
+              user.id
+            )
+            .select("id")
+            .single();
+
+          if (
+            updatedDraftError
+          ) {
+            throw updatedDraftError;
+          }
+
+          created =
+            updatedDraft;
+        } else {
+          const {
+            data:
+              recreatedDraft,
+            error:
+              recreatedDraftError,
+          } = await supabase
+            .from("store_products")
+            .insert({
+              id:
+                recoveryProductId,
+              ...draftPayload,
+            })
+            .select("id")
+            .single();
+
+          if (
+            recreatedDraftError
+          ) {
+            throw recreatedDraftError;
+          }
+
+          created =
+            recreatedDraft;
+        }
       }
 
-      productId = created.id;
+      if (!created) {
+        const {
+          data:
+            freshDraft,
+          error:
+            createError,
+        } = await supabase
+          .from("store_products")
+          .insert(
+            draftPayload
+          )
+          .select("id")
+          .single();
+
+        if (createError) {
+          throw createError;
+        }
+
+        created =
+          freshDraft;
+      }
+
+      if (!created?.id) {
+        throw new Error(
+          "Draft produk tidak tersedia."
+        );
+      }
+
+      productId =
+        created.id;
 
       updateUploadProgress(10);
 
@@ -5102,11 +5568,26 @@ export default function UploadProductScreen({
           );
 
         filePath =
-          buildStoreProductFilePath(
-            user.id,
-            created.id,
-            cleanFileName
-          );
+          (
+            productFileKind ===
+              "pdf" &&
+            createRecovery
+              ?.recovery
+              ?.productId ===
+              created.id &&
+            createRecovery
+              .recovery
+              .bucket ===
+              STORE_MEDIA_BUCKETS.productFiles
+          )
+            ? createRecovery
+                .recovery
+                .storagePath
+            : buildStoreProductFilePath(
+                user.id,
+                created.id,
+                cleanFileName
+              );
 
         let primarySizeBytes:
           number;
@@ -5117,6 +5598,7 @@ export default function UploadProductScreen({
         ) {
           primarySizeBytes =
             await uploadStoreDocumentNative(
+              user.id,
               created.id,
               STORE_MEDIA_BUCKETS.productFiles,
               filePath,
