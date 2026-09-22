@@ -6232,18 +6232,11 @@ export default function UploadProductScreen({
                   styles.documentUploadIcon
                 }
               >
-                {productFileKind ===
-                "image" ? (
-                  <ImageIcon
-                    size={25}
-                    color="#2563EB"
-                  />
-                ) : (
-                  <Upload
-                    size={25}
-                    color="#2563EB"
-                  />
-                )}
+                <Upload
+                  size={28}
+                  color="#2563EB"
+                  strokeWidth={2}
+                />
               </View>
 
               <View
@@ -6259,15 +6252,15 @@ export default function UploadProductScreen({
                   {productFileKind === "pdf"
                     ? productFile
                       ? "Dokumen PDF sudah dipilih"
-                      : "Pilih Dokumen PDF"
+                      : "Upload Dokumen PDF"
                     : productFileKind === "image"
                       ? productPages.length > 0
                         ? `${productPages.length} gambar sudah dipilih`
-                        : "Pilih Gambar dari Galeri"
+                        : "Upload Gambar dari Galeri"
                       : productFileKind === "office"
                         ? productFile
                           ? "Dokumen Word sudah dipilih"
-                          : "Pilih Dokumen Word"
+                          : "Upload Dokumen Word"
                         : "Pilih Jenis File dahulu"}
                 </Text>
 
@@ -6297,6 +6290,12 @@ export default function UploadProductScreen({
                     styles.documentUploadAction
                   }
                 >
+                  <Upload
+                    size={13}
+                    color="#FFFFFF"
+                    strokeWidth={2.2}
+                  />
+
                   <Text
                     style={
                       styles.documentUploadActionText
@@ -6305,7 +6304,7 @@ export default function UploadProductScreen({
                     {productFile ||
                     productPages.length > 0
                       ? "Ganti"
-                      : "Pilih"}
+                      : "Upload"}
                   </Text>
                 </View>
               ) : null}
@@ -6921,9 +6920,9 @@ const styles = StyleSheet.create({
   },
 
   documentUploadIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
+    width: 54,
+    height: 54,
+    borderRadius: 15,
     backgroundColor: "#DBEAFE",
     alignItems: "center",
     justifyContent: "center",
@@ -6950,13 +6949,15 @@ const styles = StyleSheet.create({
   },
 
   documentUploadAction: {
-    minWidth: 48,
-    height: 30,
+    minWidth: 68,
+    height: 32,
     paddingHorizontal: 9,
     borderRadius: 9,
     backgroundColor: "#2563EB",
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    gap: 5,
   },
 
   documentUploadActionText: {
