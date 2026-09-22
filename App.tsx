@@ -3344,6 +3344,8 @@ function StoreHome() {
 
       <View style={styles.screen}>
         <ScrollView
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="on-drag"
           showsVerticalScrollIndicator={false}
           contentContainerStyle={
             styles.scrollContent
@@ -3480,6 +3482,12 @@ function StoreHome() {
                           1 &&
                         styles.searchSuggestionRowLast,
                     ]}
+                    hitSlop={{
+                      top: 4,
+                      bottom: 4,
+                      left: 2,
+                      right: 2,
+                    }}
                     onPress={() => {
 
                       suppressSuggestionForRef.current =
